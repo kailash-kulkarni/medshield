@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MediShield AI – Hospital Surveillance Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- ===== SIDEBAR ===== -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4fc3f7" stroke-width="2.5"><path d="M12 2l2 7h7l-5.5 4 2 7L12 16l-5.5 4 2-7L3 9h7z"/></svg>
+      </div>
+      <div class="brand-text">
+        <span class="brand-name">MediShield AI</span>
+        <span class="brand-sub">Hospital Surveillance System</span>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <a class="nav-item active" data-page="overview" onclick="navigateTo('overview')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        Overview
+      </a>
+      <a class="nav-item" data-page="patients" onclick="navigateTo('patients')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Patient Surveillance
+      </a>
+      <a class="nav-item" data-page="infection" onclick="navigateTo('infection')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+        Infection Tracking
+      </a>
+      <a class="nav-item" data-page="amr" onclick="navigateTo('amr')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        AMR Intelligence
+      </a>
+      <a class="nav-item" data-page="icu" onclick="navigateTo('icu')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        ICU Monitoring
+      </a>
+      <a class="nav-item" data-page="genomic" onclick="navigateTo('genomic')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3c.6 5.4 3 10.5 9 12M21 21c-.6-5.4-3-10.5-9-12"/><path d="M3 21c.6-5.4 3-10.5 9-12M21 3c-.6 5.4-3 10.5-9 12"/></svg>
+        Genomic Surveillance
+      </a>
+      <a class="nav-item" data-page="resources" onclick="navigateTo('resources')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="15" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+        Resource Management
+      </a>
+      <a class="nav-item" data-page="alerts" onclick="navigateTo('alerts')" style="position:relative">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        Alerts &amp; Notifications
+        <span class="nav-badge" id="navAlertBadge">5</span>
+      </a>
+      <a class="nav-item" data-page="reports" onclick="navigateTo('reports')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        Reports
+      </a>
+      <a class="nav-item" data-page="analytics" onclick="navigateTo('analytics')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        Analytics
+      </a>
+      <a class="nav-item" data-page="usermgmt" onclick="navigateTo('usermgmt')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        User Management
+      </a>
+      <a class="nav-item" data-page="settings" onclick="navigateTo('settings')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93A10 10 0 0 0 4.93 19.07M19.07 19.07A10 10 0 0 0 4.93 4.93"/></svg>
+        System Settings
+      </a>
+    </nav>
+
+    <div class="sidebar-user">
+      <div class="user-avatar">DA</div>
+      <div class="user-info">
+        <span class="user-name">Dr. Admin</span>
+        <span class="user-role">Administrator</span>
+      </div>
+    </div>
+
+    <div class="sidebar-darkmode">
+      <span class="dm-label">Dark Mode</span>
+      <label class="toggle-switch">
+        <input type="checkbox" id="darkModeToggle" checked onchange="toggleDarkMode()" />
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+  </aside>
+
+  <!-- ===== MAIN CONTENT ===== -->
+  <div class="main-wrapper">
+    <!-- HEADER -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="menu-btn" onclick="toggleSidebar()">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+        <div class="search-bar">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" placeholder="Search Patient, Ward, Pathogen..." id="searchInput" oninput="handleSearch()" />
+        </div>
+      </div>
+      <div class="topbar-center">
+        <span id="headerDateRange" class="date-range">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <span id="dateRangeText">13 May – 19 May 2024</span>
+        </span>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-clock" id="topbarClock">10:30 AM</div>
+        <div class="dept-select-wrap">
+          <select class="dept-select">
+            <option>All Departments</option>
+            <option>ICU</option>
+            <option>Emergency</option>
+            <option>Cardiology</option>
+            <option>Oncology</option>
+            <option>Neurology</option>
+          </select>
+        </div>
+        <button class="icon-btn notif-btn" onclick="navigateTo('alerts')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span class="notif-badge" id="notifBadge">12</span>
+        </button>
+        <button class="icon-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93A10 10 0 0 0 4.93 19.07"/><path d="M4.93 4.93a10 10 0 0 1 14.14 0"/></svg></button>
+        <div class="user-pill">
+          <div class="user-avatar-sm">DA</div>
+          <div>
+            <div class="user-pill-name">Dr. Admin</div>
+            <div class="user-pill-role">Administrator</div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- PAGE ROUTER -->
+    <main class="page-content" id="pageContent">
+      <!-- Pages injected by JS -->
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
