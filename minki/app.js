@@ -717,39 +717,723 @@ function buildResourceItems() {
 }
 
 // ─── PATIENT SURVEILLANCE PAGE ────────────────────────────────
+let ptPage = 1;
+const PT_PER_PAGE = 25;
+let ptFiltered = [];
+
 function renderPatients() {
   const content = $('pageContent');
+
+  const db        = window.PATIENTS_DB || [];
+  const critical  = db.filter(p => p.risk === 'high').length;
+  const avgLos    = db.length ? (db.reduce((a,p) => a + p.los, 0) / db.length).toFixed(1) : '0';
+  const onVent    = db.filter(p => p.ventilator).length;
+
   content.innerHTML = `
     <div class="section-page-header fade-in">
       <div>
         <div class="section-page-title">Patient Surveillance</div>
-        <div class="page-subtitle">Monitor all admitted patients in real-time</div>
+        <div class="page-subtitle" id="ptSubtitle">Monitor all ${db.length.toLocaleString()} admitted patients in real-time</div>
       </div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-outline">Export</button>
-        <button class="btn btn-primary">+ Add Patient</button>
+        <button class="btn btn-outline" onclick="exportPatientCSV()">⬇ Export CSV</button>
+        <button class="btn btn-primary" onclick="openAddPatientModal()">＋ Add Patient</button>
       </div>
     </div>
     <div class="stats-grid fade-in" style="grid-template-columns:repeat(4,1fr)">
-      ${buildMiniStatCard('Total Admitted','1,248','▲ 12%','up','#42a5f5')}
-      ${buildMiniStatCard('Discharged Today','34','▲ 5%','up','#66bb6a')}
-      ${buildMiniStatCard('Critical Condition','43','▲ 8%','up','#ef5350')}
-      ${buildMiniStatCard('Avg. Stay (days)','5.2','▼ 3%','down','#ab47bc')}
+      ${buildMiniStatCard('Total Admitted', db.length.toLocaleString(),'▲ 12%','up','#42a5f5')}
+      ${buildMiniStatCard('High Risk',String(critical),'▲ 8%','up','#ef5350')}
+      ${buildMiniStatCard('On Ventilator',String(onVent),'—','neutral','#ffa726')}
+      ${buildMiniStatCard('Avg. Stay (days)',avgLos,'▼ 3%','down','#ab47bc')}
     </div>
     <div class="card fade-in">
-      <div class="card-header">
-        <div class="card-title">Patient List</div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <input type="text" placeholder="Search patient..." style="background:var(--bg-secondary);border:1px solid var(--border);color:var(--text-primary);border-radius:6px;padding:5px 10px;font-size:12px;outline:none" />
-          <select style="background:var(--bg-secondary);border:1px solid var(--border);color:var(--text-primary);border-radius:6px;padding:5px 8px;font-size:12px;outline:none">
-            <option>All Wards</option><option>ICU</option><option>General</option><option>Isolation</option>
+      <div class="card-header" style="flex-wrap:wrap;gap:10px">
+        <div class="card-title">Patient List <span style="color:var(--text-muted);font-weight:400;font-size:12px" id="ptCountLabel">(1000 patients)</span></div>
+        <div class="pt-search-row">
+          <input type="text" id="ptSearch" placeholder="Search name, ID, diagnosis..." oninput="filterPatients()" />
+          <select id="ptWardFilter" onchange="filterPatients()">
+            <option value="">All Wards</option>
+            <option>ICU-1</option><option>ICU-2</option><option>ICU-3</option>
+            <option>MED-1</option><option>MED-2</option><option>MED-3</option><option>MED-4</option>
+            <option>SUR-1</option><option>SUR-2</option>
+            <option>ISO-1</option><option>ISO-2</option><option>ISO-3</option>
+            <option>GEN-1</option><option>GEN-2</option><option>GEN-3</option>
+            <option>NEU-1</option><option>CAR-1</option><option>ONC-1</option><option>PED-1</option><option>EMG-1</option>
+          </select>
+          <select id="ptRiskFilter" onchange="filterPatients()">
+            <option value="">All Risk Levels</option>
+            <option value="high">High Risk</option>
+            <option value="medium">Medium Risk</option>
+            <option value="low">Low Risk</option>
+          </select>
+          <select id="ptStatusFilter" onchange="filterPatients()">
+            <option value="">All Statuses</option>
+            <option>Critical</option><option>Stable</option><option>Improving</option>
+            <option>Under Observation</option><option>Discharged</option>
           </select>
         </div>
       </div>
-      <div class="card-body" style="padding:0">
-        ${buildPatientTable()}
+      <div id="ptTableWrap" style="overflow-x:auto"></div>
+      <div id="ptPagination"></div>
+    </div>`;
+
+  ptPage = 1;
+  ptFiltered = [...db];
+  renderPatientTable();
+}
+
+function filterPatients() {
+  const q      = $('ptSearch')       ? $('ptSearch').value.toLowerCase()       : '';
+  const ward   = $('ptWardFilter')   ? $('ptWardFilter').value                  : '';
+  const risk   = $('ptRiskFilter')   ? $('ptRiskFilter').value                  : '';
+  const status = $('ptStatusFilter') ? $('ptStatusFilter').value                : '';
+
+  ptFiltered = (window.PATIENTS_DB || []).filter(p => {
+    const matchQ  = !q      || p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q) || p.diag.toLowerCase().includes(q);
+    const matchW  = !ward   || p.ward === ward;
+    const matchR  = !risk   || p.risk === risk;
+    const matchS  = !status || p.status === status;
+    return matchQ && matchW && matchR && matchS;
+  });
+  ptPage = 1;
+  renderPatientTable();
+}
+
+function renderPatientTable() {
+  const wrap = $('ptTableWrap');
+  const pgEl = $('ptPagination');
+  const lbl  = $('ptCountLabel');
+  if (!wrap) return;
+
+  const total = ptFiltered.length;
+  const totalPages = Math.max(1, Math.ceil(total / PT_PER_PAGE));
+  if (ptPage > totalPages) ptPage = totalPages;
+  const start = (ptPage - 1) * PT_PER_PAGE;
+  const slice = ptFiltered.slice(start, start + PT_PER_PAGE);
+
+  if (lbl) lbl.textContent = `(${total.toLocaleString()} patient${total !== 1 ? 's' : ''})`;
+
+  const statusColor = s => ({ Critical:'#ef5350', Stable:'#ffa726', Improving:'#66bb6a', 'Under Observation':'#29b6f6', Discharged:'#8b949e' }[s] || '#8b949e');
+
+  wrap.innerHTML = `
+    <table class="amr-table" style="width:100%">
+      <thead>
+        <tr>
+          <th>ID</th><th>Patient Name</th><th>Age</th><th>Gender</th>
+          <th>Ward</th><th>Room</th><th>Diagnosis</th><th>Risk</th>
+          <th>Status</th><th>Admitted</th><th>LOS</th><th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${slice.map(r => `
+          <tr>
+            <td style="color:var(--accent-blue);font-weight:500">${r.id}</td>
+            <td style="color:var(--text-primary);font-weight:500;white-space:nowrap">${r.name}</td>
+            <td>${r.age}</td>
+            <td>${r.gender}</td>
+            <td>${r.ward}</td>
+            <td style="color:var(--text-muted)">${r.roomNo}</td>
+            <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.diag}">${r.diag}</td>
+            <td><span class="badge badge-${r.risk}">${r.risk.toUpperCase()}</span></td>
+            <td style="color:${statusColor(r.status)};font-weight:500">${r.status}</td>
+            <td style="color:var(--text-muted);white-space:nowrap">${r.adm}</td>
+            <td>${r.los}d</td>
+            <td><button class="btn btn-primary" style="padding:4px 10px;font-size:11px;white-space:nowrap" onclick="openPatientModal('${r.id}')">View Patient</button></td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+
+  // Pagination
+  const maxBtns = 7;
+  let pages = [];
+  if (totalPages <= maxBtns) {
+    pages = Array.from({length: totalPages}, (_,i) => i+1);
+  } else {
+    pages = [1];
+    if (ptPage > 3) pages.push('...');
+    for (let p = Math.max(2, ptPage-1); p <= Math.min(totalPages-1, ptPage+1); p++) pages.push(p);
+    if (ptPage < totalPages - 2) pages.push('...');
+    pages.push(totalPages);
+  }
+
+  pgEl.innerHTML = `
+    <div class="pagination-bar">
+      <div class="pagination-info">Showing ${start+1}–${Math.min(start+PT_PER_PAGE, total)} of ${total.toLocaleString()} patients</div>
+      <div class="pagination-btns">
+        <button class="pg-btn" onclick="goPatientPage(${ptPage-1})" ${ptPage===1?'disabled':''}>‹ Prev</button>
+        ${pages.map(p => p === '...'
+          ? `<span class="pg-btn" style="cursor:default">…</span>`
+          : `<button class="pg-btn ${p===ptPage?'active':''}" onclick="goPatientPage(${p})">${p}</button>`
+        ).join('')}
+        <button class="pg-btn" onclick="goPatientPage(${ptPage+1})" ${ptPage===totalPages?'disabled':''}>Next ›</button>
       </div>
     </div>`;
+}
+
+function goPatientPage(p) {
+  const totalPages = Math.ceil(ptFiltered.length / PT_PER_PAGE);
+  if (p < 1 || p > totalPages) return;
+  ptPage = p;
+  renderPatientTable();
+  const w = $('ptTableWrap');
+  if (w) w.scrollIntoView({ behavior:'smooth', block:'start' });
+}
+
+// ─── PATIENT MODAL ────────────────────────────────────────────
+function openPatientModal(id) {
+  const p = (window.PATIENTS_DB || []).find(x => x.id === id);
+  if (!p) return;
+
+  const existing = document.querySelector('.modal-overlay');
+  if (existing) existing.remove();
+
+  const riskColor   = { high:'#ef5350', medium:'#ffa726', low:'#66bb6a' }[p.risk]   || '#8b949e';
+  const statusColor = { Critical:'#ef5350', Stable:'#ffa726', Improving:'#66bb6a', 'Under Observation':'#29b6f6', Discharged:'#8b949e' }[p.status] || '#8b949e';
+
+  const vitBpColor  = parseFloat(p.vitals.bp) < 90 ? '#ef5350' : 'var(--text-primary)';
+  const vitHrColor  = p.vitals.hr > 120 ? '#ef5350' : p.vitals.hr > 100 ? '#ffa726' : '#66bb6a';
+  const vitSpo2Color= p.vitals.spo2 < 90 ? '#ef5350' : p.vitals.spo2 < 94 ? '#ffa726' : '#66bb6a';
+  const vitTempColor= parseFloat(p.vitals.temp) > 38.5 ? '#ef5350' : parseFloat(p.vitals.temp) > 37.5 ? '#ffa726' : '#66bb6a';
+  const sofaColor   = p.sofa >= 10 ? '#ef5350' : p.sofa >= 6 ? '#ffa726' : '#66bb6a';
+  const news2Color  = p.news2 >= 7  ? '#ef5350' : p.news2 >= 3 ? '#ffa726' : '#66bb6a';
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <div class="modal-header">
+        <div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <div class="modal-patient-name">${p.name}</div>
+            <span class="badge badge-${p.risk}">${p.risk.toUpperCase()} RISK</span>
+            <span style="font-size:12px;font-weight:600;color:${statusColor}">${p.status}</span>
+          </div>
+          <div class="modal-patient-id">${p.id} &nbsp;|&nbsp; ${p.ward} – Room ${p.roomNo} &nbsp;|&nbsp; Attending: ${p.doctor}</div>
+        </div>
+        <button class="modal-close-btn" onclick="closePatientModal()">✕</button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Demographics -->
+        <div class="modal-section-title">Demographics</div>
+        <div class="modal-grid-4">
+          <div class="modal-field"><div class="modal-field-label">Age</div><div class="modal-field-value">${p.age} years</div></div>
+          <div class="modal-field"><div class="modal-field-label">Gender</div><div class="modal-field-value">${p.gender}</div></div>
+          <div class="modal-field"><div class="modal-field-label">Blood Group</div><div class="modal-field-value" style="color:#ef5350">${p.blood}</div></div>
+          <div class="modal-field"><div class="modal-field-label">Admission Date</div><div class="modal-field-value">${p.adm}</div></div>
+        </div>
+
+        <!-- Clinical Info -->
+        <div class="modal-section-title">Clinical Information</div>
+        <div class="modal-grid-3">
+          <div class="modal-field"><div class="modal-field-label">Primary Diagnosis</div><div class="modal-field-value">${p.diag}</div></div>
+          <div class="modal-field"><div class="modal-field-label">Infection Site</div><div class="modal-field-value">${p.infectionSite}</div></div>
+          <div class="modal-field"><div class="modal-field-label">Causative Organism</div><div class="modal-field-value" style="font-style:italic">${p.organism}</div></div>
+        </div>
+        <div class="modal-grid-3" style="margin-top:10px">
+          <div class="modal-field"><div class="modal-field-label">Comorbidities</div><div class="modal-field-value" style="font-size:12px">${p.comorbid}</div></div>
+          <div class="modal-field"><div class="modal-field-label">Current Antibiotic</div><div class="modal-field-value">${p.antibiotic}</div></div>
+          <div class="modal-field"><div class="modal-field-label">Length of Stay</div><div class="modal-field-value">${p.los} days</div></div>
+        </div>
+        <div class="modal-grid-4" style="margin-top:10px">
+          <div class="modal-field"><div class="modal-field-label">SOFA Score</div><div class="modal-field-value" style="color:${sofaColor}">${p.sofa}</div></div>
+          <div class="modal-field"><div class="modal-field-label">NEWS2 Score</div><div class="modal-field-value" style="color:${news2Color}">${p.news2}</div></div>
+          <div class="modal-field"><div class="modal-field-label">Ventilator</div><div class="modal-field-value" style="color:${p.ventilator?'#ef5350':'#66bb6a'}">${p.ventilator ? 'Yes – Active' : 'No'}</div></div>
+          <div class="modal-field"><div class="modal-field-label">Isolation</div><div class="modal-field-value" style="color:${p.isolation?'#ffa726':'var(--text-primary)'}">${p.isolation ? 'Yes' : 'No'}</div></div>
+        </div>
+
+        <!-- Vitals -->
+        <div class="modal-section-title">Current Vitals</div>
+        <div class="modal-grid-3">
+          <div class="vital-card">
+            <div class="vital-label">Blood Pressure</div>
+            <div class="vital-value" style="color:${vitBpColor}">${p.vitals.bp}</div>
+            <div class="vital-unit">mmHg</div>
+          </div>
+          <div class="vital-card">
+            <div class="vital-label">Heart Rate</div>
+            <div class="vital-value" style="color:${vitHrColor}">${p.vitals.hr}</div>
+            <div class="vital-unit">bpm</div>
+          </div>
+          <div class="vital-card">
+            <div class="vital-label">SpO₂</div>
+            <div class="vital-value" style="color:${vitSpo2Color}">${p.vitals.spo2}%</div>
+            <div class="vital-unit">Oxygen Saturation</div>
+          </div>
+          <div class="vital-card">
+            <div class="vital-label">Respiratory Rate</div>
+            <div class="vital-value" style="color:${p.vitals.rr > 25 ? '#ef5350' : 'var(--text-primary)'}">${p.vitals.rr}</div>
+            <div class="vital-unit">breaths/min</div>
+          </div>
+          <div class="vital-card">
+            <div class="vital-label">Temperature</div>
+            <div class="vital-value" style="color:${vitTempColor}">${p.vitals.temp}°C</div>
+            <div class="vital-unit">Body Temp</div>
+          </div>
+          <div class="vital-card">
+            <div class="vital-label">GCS Score</div>
+            <div class="vital-value" style="color:${p.vitals.gcs < 9 ? '#ef5350' : p.vitals.gcs < 13 ? '#ffa726' : '#66bb6a'}">${p.vitals.gcs}</div>
+            <div class="vital-unit">Glasgow Coma Scale</div>
+          </div>
+        </div>
+
+        <!-- Risk Summary -->
+        <div class="modal-section-title">Risk Summary</div>
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:14px">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="width:42px;height:42px;border-radius:50%;background:${riskColor}22;border:2px solid ${riskColor};display:flex;align-items:center;justify-content:center;font-size:18px">
+                ${p.risk==='high'?'🔴':p.risk==='medium'?'🟠':'🟢'}
+              </div>
+              <div>
+                <div style="font-size:14px;font-weight:700;color:${riskColor}">${p.risk.charAt(0).toUpperCase()+p.risk.slice(1)} Risk Patient</div>
+                <div style="font-size:11px;color:var(--text-muted)">SOFA: ${p.sofa} &nbsp;|&nbsp; NEWS2: ${p.news2} &nbsp;|&nbsp; Status: ${p.status}</div>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-outline" style="font-size:12px" onclick="closePatientModal()">Close</button>
+              <button class="btn btn-primary" style="font-size:12px">Generate Report</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>`;
+
+  overlay.addEventListener('click', e => { if (e.target === overlay) closePatientModal(); });
+  document.body.appendChild(overlay);
+  document.addEventListener('keydown', _escClose);
+}
+
+function _escClose(e) {
+  if (e.key === 'Escape') closePatientModal();
+}
+
+function closePatientModal() {
+  const overlay = document.querySelector('.modal-overlay');
+  if (overlay) overlay.remove();
+  document.removeEventListener('keydown', _escClose);
+}
+
+// ─── CSV EXPORT ───────────────────────────────────────────────
+function exportPatientCSV() {
+  const rows = ptFiltered.length ? ptFiltered : (window.PATIENTS_DB || []);
+  const headers = ['ID','Name','Age','Gender','Ward','Room','Diagnosis','Risk','Status','Admitted','LOS(days)','Blood Group','Antibiotic','Comorbidities','Organism','Infection Site','SOFA','NEWS2','Ventilator','Isolation','Doctor','BP','HR','SpO2','RR','Temp','GCS'];
+  const csvRows = [headers.join(',')];
+  rows.forEach(p => {
+    csvRows.push([
+      p.id, `"${p.name}"`, p.age, p.gender, p.ward, p.roomNo,
+      `"${p.diag}"`, p.risk, p.status, p.adm, p.los, p.blood,
+      p.antibiotic, `"${p.comorbid}"`, `"${p.organism}"`, p.infectionSite,
+      p.sofa, p.news2, p.ventilator?'Yes':'No', p.isolation?'Yes':'No',
+      `"${p.doctor}"`, p.vitals.bp, p.vitals.hr, p.vitals.spo2,
+      p.vitals.rr, p.vitals.temp, p.vitals.gcs
+    ].join(','));
+  });
+  const blob = new Blob([csvRows.join('\n')], { type:'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'medshield_patients.csv';
+  a.click();
+}
+
+// ─── ADD PATIENT MODAL ────────────────────────────────────────
+function openAddPatientModal() {
+  const existing = document.querySelector('.modal-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'addPatientOverlay';
+
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:780px">
+      <div class="modal-header">
+        <div>
+          <div class="modal-patient-name">Add New Patient</div>
+          <div class="modal-patient-id">Fill in all required fields to register a new patient</div>
+        </div>
+        <button class="modal-close-btn" onclick="closeAddPatientModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <form id="addPatientForm" onsubmit="submitAddPatient(event)" autocomplete="off">
+
+          <!-- ── Personal Information ── -->
+          <div class="modal-section-title">Personal Information</div>
+          <div class="modal-grid-3">
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">First Name <span class="apf-req">*</span></label>
+              <input class="apf-input" id="apf_firstName" type="text" placeholder="e.g. James" required />
+            </div>
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">Last Name <span class="apf-req">*</span></label>
+              <input class="apf-input" id="apf_lastName" type="text" placeholder="e.g. Wilson" required />
+            </div>
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">Age <span class="apf-req">*</span></label>
+              <input class="apf-input" id="apf_age" type="number" min="1" max="120" placeholder="e.g. 45" required />
+            </div>
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">Gender <span class="apf-req">*</span></label>
+              <select class="apf-input" id="apf_gender" required>
+                <option value="">Select...</option>
+                <option>Male</option>
+                <option>Female</option>
+                <option>Other</option>
+              </select>
+            </div>
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">Blood Group <span class="apf-req">*</span></label>
+              <select class="apf-input" id="apf_blood" required>
+                <option value="">Select...</option>
+                <option>A+</option><option>A-</option>
+                <option>B+</option><option>B-</option>
+                <option>AB+</option><option>AB-</option>
+                <option>O+</option><option>O-</option>
+              </select>
+            </div>
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">Admission Date <span class="apf-req">*</span></label>
+              <input class="apf-input" id="apf_adm" type="date" required />
+            </div>
+          </div>
+
+          <!-- ── Location ── -->
+          <div class="modal-section-title">Location</div>
+          <div class="modal-grid-3">
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">Ward <span class="apf-req">*</span></label>
+              <select class="apf-input" id="apf_ward" required>
+                <option value="">Select ward...</option>
+                <option>ICU-1</option><option>ICU-2</option><option>ICU-3</option>
+                <option>MED-1</option><option>MED-2</option><option>MED-3</option><option>MED-4</option>
+                <option>SUR-1</option><option>SUR-2</option>
+                <option>ISO-1</option><option>ISO-2</option><option>ISO-3</option>
+                <option>GEN-1</option><option>GEN-2</option><option>GEN-3</option>
+                <option>NEU-1</option><option>CAR-1</option><option>ONC-1</option>
+                <option>PED-1</option><option>EMG-1</option>
+              </select>
+            </div>
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">Room No. <span class="apf-req">*</span></label>
+              <input class="apf-input" id="apf_room" type="text" placeholder="e.g. A214" required />
+            </div>
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">Attending Doctor <span class="apf-req">*</span></label>
+              <select class="apf-input" id="apf_doctor" required>
+                <option value="">Select doctor...</option>
+                <option>Dr. Sarah Kim</option><option>Dr. Raj Patel</option>
+                <option>Dr. Emily Chen</option><option>Dr. Carlos Rivera</option>
+                <option>Dr. James Okafor</option><option>Dr. Priya Nair</option>
+                <option>Dr. Thomas Walsh</option><option>Dr. Fatima Al-Hassan</option>
+                <option>Dr. Michael Torres</option><option>Dr. Lisa Wang</option>
+                <option>Dr. Ahmed Hassan</option><option>Dr. Julia Roberts</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- ── Clinical Information ── -->
+          <div class="modal-section-title">Clinical Information</div>
+          <div class="modal-grid-3">
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">Primary Diagnosis <span class="apf-req">*</span></label>
+              <select class="apf-input" id="apf_diag" required>
+                <option value="">Select diagnosis...</option>
+                <option>Sepsis</option><option>UTI</option><option>Pneumonia</option>
+                <option>Post-op Infection</option><option>MRSA</option><option>SSI</option>
+                <option>ARDS</option><option>HAI – UTI</option>
+                <option>Carbapenem-Resistant Klebsiella</option>
+                <option>Ventilator-Associated Pneumonia</option><option>Bacteremia</option>
+                <option>Clostridium difficile Infection</option>
+                <option>Central Line-Associated BSI</option>
+                <option>Hospital-Acquired Pneumonia</option>
+                <option>Urinary Catheter Infection</option>
+                <option>ESBL E. coli</option>
+                <option>Methicillin-Resistant S. aureus</option>
+                <option>Vancomycin-Resistant Enterococcus</option>
+                <option>COVID-19</option><option>Influenza A</option>
+                <option>Tuberculosis</option><option>Endocarditis</option>
+                <option>Meningitis</option><option>Peritonitis</option>
+                <option>Cellulitis</option><option>Osteomyelitis</option>
+                <option>Multidrug-Resistant Acinetobacter</option>
+                <option>Pseudomonas Aeruginosa Infection</option>
+              </select>
+            </div>
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">Risk Level <span class="apf-req">*</span></label>
+              <select class="apf-input" id="apf_risk" required>
+                <option value="">Select...</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">Patient Status <span class="apf-req">*</span></label>
+              <select class="apf-input" id="apf_status" required>
+                <option value="">Select...</option>
+                <option>Critical</option><option>Stable</option>
+                <option>Improving</option><option>Under Observation</option>
+                <option>Discharged</option>
+              </select>
+            </div>
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">Infection Site</label>
+              <select class="apf-input" id="apf_infectionSite">
+                <option value="">Select...</option>
+                <option>Blood</option><option>Urine</option>
+                <option>Respiratory</option><option>Wound</option>
+                <option>CSF</option><option>Unknown</option>
+              </select>
+            </div>
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">Causative Organism</label>
+              <select class="apf-input" id="apf_organism">
+                <option value="">Select...</option>
+                <option>E. coli</option><option>Klebsiella pneumoniae</option>
+                <option>Staphylococcus aureus</option><option>Pseudomonas aeruginosa</option>
+                <option>Acinetobacter baumannii</option><option>Enterococcus faecium</option>
+                <option>Streptococcus pneumoniae</option><option>Candida albicans</option>
+                <option>Clostridium difficile</option><option>SARS-CoV-2</option>
+                <option>None identified</option>
+              </select>
+            </div>
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">Current Antibiotic</label>
+              <select class="apf-input" id="apf_antibiotic">
+                <option value="">Select...</option>
+                <option>Meropenem</option><option>Vancomycin</option>
+                <option>Piperacillin-Tazobactam</option><option>Ceftriaxone</option>
+                <option>Ciprofloxacin</option><option>Metronidazole</option>
+                <option>Amoxicillin-Clavulanate</option><option>Doxycycline</option>
+                <option>Azithromycin</option><option>Linezolid</option>
+                <option>Colistin</option><option>Tigecycline</option>
+                <option>Imipenem</option><option>Cefepime</option>
+                <option>None</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="modal-grid-2" style="margin-top:10px">
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">Comorbidities</label>
+              <input class="apf-input" id="apf_comorbid" type="text" placeholder="e.g. Diabetes, Hypertension" />
+            </div>
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">Length of Stay (days) <span class="apf-req">*</span></label>
+              <input class="apf-input" id="apf_los" type="number" min="1" max="365" placeholder="e.g. 5" required />
+            </div>
+          </div>
+
+          <!-- ── Vitals ── -->
+          <div class="modal-section-title">Current Vitals</div>
+          <div class="modal-grid-3">
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">Blood Pressure (mmHg) <span class="apf-req">*</span></label>
+              <input class="apf-input" id="apf_bp" type="text" placeholder="e.g. 120/80" required pattern="\\d{2,3}\\/\\d{2,3}" title="Format: 120/80" />
+            </div>
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">Heart Rate (bpm) <span class="apf-req">*</span></label>
+              <input class="apf-input" id="apf_hr" type="number" min="20" max="250" placeholder="e.g. 80" required />
+            </div>
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">SpO₂ (%) <span class="apf-req">*</span></label>
+              <input class="apf-input" id="apf_spo2" type="number" min="50" max="100" placeholder="e.g. 97" required />
+            </div>
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">Respiratory Rate (/min) <span class="apf-req">*</span></label>
+              <input class="apf-input" id="apf_rr" type="number" min="5" max="60" placeholder="e.g. 16" required />
+            </div>
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">Temperature (°C) <span class="apf-req">*</span></label>
+              <input class="apf-input" id="apf_temp" type="number" min="32" max="43" step="0.1" placeholder="e.g. 37.2" required />
+            </div>
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">GCS Score <span class="apf-req">*</span></label>
+              <input class="apf-input" id="apf_gcs" type="number" min="3" max="15" placeholder="e.g. 15" required />
+            </div>
+          </div>
+
+          <!-- ── Scores & Flags ── -->
+          <div class="modal-section-title">Severity Scores & Flags</div>
+          <div class="modal-grid-4">
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">SOFA Score</label>
+              <input class="apf-input" id="apf_sofa" type="number" min="0" max="24" placeholder="0–24" />
+            </div>
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">NEWS2 Score</label>
+              <input class="apf-input" id="apf_news2" type="number" min="0" max="20" placeholder="0–20" />
+            </div>
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">On Ventilator?</label>
+              <select class="apf-input" id="apf_ventilator">
+                <option value="false">No</option>
+                <option value="true">Yes</option>
+              </select>
+            </div>
+            <div class="modal-field" style="background:none;border:none;padding:0">
+              <label class="apf-label">Isolation Required?</label>
+              <select class="apf-input" id="apf_isolation">
+                <option value="false">No</option>
+                <option value="true">Yes</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- ── Error message ── -->
+          <div id="apf_error" style="display:none;color:#ef5350;font-size:12px;margin-top:12px;padding:10px 12px;background:rgba(239,83,80,0.1);border:1px solid rgba(239,83,80,0.3);border-radius:8px"></div>
+
+          <!-- ── Footer buttons ── -->
+          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+            <button type="button" class="btn btn-outline" onclick="closeAddPatientModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="apf_submitBtn">
+              <span id="apf_submitLabel">Add Patient</span>
+            </button>
+          </div>
+
+        </form>
+      </div>
+    </div>`;
+
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeAddPatientModal(); });
+  document.addEventListener('keydown', _escAddClose);
+  document.body.appendChild(overlay);
+
+  // Set today's date as default for admission
+  const today = new Date().toISOString().split('T')[0];
+  const admEl = document.getElementById('apf_adm');
+  if (admEl) admEl.value = today;
+}
+
+function _escAddClose(e) {
+  if (e.key === 'Escape') closeAddPatientModal();
+}
+
+function closeAddPatientModal() {
+  const overlay = document.getElementById('addPatientOverlay');
+  if (overlay) overlay.remove();
+  document.removeEventListener('keydown', _escAddClose);
+}
+
+function submitAddPatient(e) {
+  e.preventDefault();
+
+  const get    = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  const getBool= id => { const el = document.getElementById(id); return el ? el.value === 'true' : false; };
+  const getNum = id => { const el = document.getElementById(id); return el && el.value ? parseInt(el.value, 10) : 0; };
+  const getFlt = id => { const el = document.getElementById(id); return el && el.value ? parseFloat(el.value) : 0; };
+
+  const errEl = document.getElementById('apf_error');
+
+  // Required field validation
+  const required = [
+    ['apf_firstName','First Name'],['apf_lastName','Last Name'],
+    ['apf_age','Age'],['apf_gender','Gender'],['apf_blood','Blood Group'],
+    ['apf_adm','Admission Date'],['apf_ward','Ward'],['apf_room','Room No.'],
+    ['apf_doctor','Attending Doctor'],['apf_diag','Primary Diagnosis'],
+    ['apf_risk','Risk Level'],['apf_status','Patient Status'],
+    ['apf_los','Length of Stay'],
+    ['apf_bp','Blood Pressure'],['apf_hr','Heart Rate'],
+    ['apf_spo2','SpO₂'],['apf_rr','Respiratory Rate'],
+    ['apf_temp','Temperature'],['apf_gcs','GCS Score'],
+  ];
+  for (const [id, label] of required) {
+    if (!get(id)) {
+      errEl.textContent = `⚠ Please fill in the required field: ${label}`;
+      errEl.style.display = 'block';
+      document.getElementById(id).focus();
+      return;
+    }
+  }
+  errEl.style.display = 'none';
+
+  // Build new patient object
+  const db = window.PATIENTS_DB || [];
+  const nextNum = 4500 + db.length;
+  const newId   = `P-${nextNum}`;
+
+  const admRaw  = get('apf_adm');  // "2024-05-16"
+  const admDate = new Date(admRaw);
+  const admFormatted = admDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
+
+  const patient = {
+    id:           newId,
+    name:         `${get('apf_firstName')} ${get('apf_lastName')}`,
+    firstName:    get('apf_firstName'),
+    lastName:     get('apf_lastName'),
+    age:          getNum('apf_age'),
+    gender:       get('apf_gender'),
+    ward:         get('apf_ward'),
+    roomNo:       get('apf_room'),
+    diag:         get('apf_diag'),
+    risk:         get('apf_risk'),
+    status:       get('apf_status'),
+    adm:          admFormatted,
+    blood:        get('apf_blood'),
+    antibiotic:   get('apf_antibiotic') || 'None',
+    comorbid:     get('apf_comorbid')   || 'None',
+    organism:     get('apf_organism')   || 'None identified',
+    infectionSite:get('apf_infectionSite') || 'Unknown',
+    doctor:       get('apf_doctor'),
+    los:          getNum('apf_los'),
+    sofa:         getNum('apf_sofa'),
+    news2:        getNum('apf_news2'),
+    ventilator:   getBool('apf_ventilator'),
+    isolation:    getBool('apf_isolation'),
+    vitals: {
+      bp:   get('apf_bp'),
+      hr:   getNum('apf_hr'),
+      rr:   getNum('apf_rr'),
+      spo2: getNum('apf_spo2'),
+      temp: getFlt('apf_temp').toFixed(1),
+      gcs:  getNum('apf_gcs'),
+    },
+  };
+
+  // Show loading state
+  const btn = document.getElementById('apf_submitBtn');
+  const lbl = document.getElementById('apf_submitLabel');
+  if (btn) btn.disabled = true;
+  if (lbl) lbl.textContent = 'Adding...';
+
+  // Push into dataset
+  window.PATIENTS_DB.push(patient);
+
+  // Brief delay for UX feedback, then close & refresh
+  setTimeout(() => {
+    closeAddPatientModal();
+    // Refresh the Patient Surveillance page
+    renderPatients();
+    // Jump to last page so new patient is visible
+    const total      = window.PATIENTS_DB.length;
+    const totalPages = Math.ceil(total / PT_PER_PAGE);
+    goPatientPage(totalPages);
+    // Flash success toast
+    showToast(`✓ Patient ${patient.name} (${newId}) added successfully`, 'success');
+  }, 300);
+}
+
+// ─── TOAST NOTIFICATION ───────────────────────────────────────
+function showToast(msg, type) {
+  const existing = document.querySelector('.ms-toast');
+  if (existing) existing.remove();
+
+  const toast = document.createElement('div');
+  toast.className = 'ms-toast';
+  toast.style.cssText = `
+    position:fixed; bottom:24px; right:24px; z-index:9999;
+    background:${type === 'success' ? '#1b5e20' : '#b71c1c'};
+    border:1px solid ${type === 'success' ? '#2e7d32' : '#c62828'};
+    color:#fff; padding:12px 18px; border-radius:10px;
+    font-size:13px; font-weight:500;
+    box-shadow:0 8px 24px rgba(0,0,0,0.4);
+    display:flex; align-items:center; gap:8px;
+    animation:slideUpToast 0.3s ease;
+  `;
+  toast.textContent = msg;
+  document.body.appendChild(toast);
+  setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.4s'; setTimeout(() => toast.remove(), 400); }, 3500);
 }
 
 function buildMiniStatCard(label, value, change, dir, color) {
@@ -764,40 +1448,6 @@ function buildMiniStatCard(label, value, change, dir, color) {
     </div>`;
 }
 
-function buildPatientTable() {
-  const rows = [
-    { id:'P-4521', name:'James Wilson',    age:67, ward:'ICU-1',   diag:'Sepsis',           risk:'high',   adm:'14 May 2024', status:'Critical' },
-    { id:'P-4522', name:'Maria Garcia',    age:54, ward:'MED-2',   diag:'UTI',               risk:'medium', adm:'15 May 2024', status:'Stable' },
-    { id:'P-4523', name:'Robert Chen',     age:72, ward:'ICU-2',   diag:'Pneumonia',         risk:'high',   adm:'13 May 2024', status:'Critical' },
-    { id:'P-4524', name:'Susan Taylor',    age:45, ward:'GEN-3',   diag:'Post-op Infection', risk:'low',    adm:'16 May 2024', status:'Improving' },
-    { id:'P-4525', name:'Michael Brown',   age:59, ward:'ISO-1',   diag:'MRSA',              risk:'high',   adm:'12 May 2024', status:'Stable' },
-    { id:'P-4526', name:'Linda Anderson',  age:38, ward:'SUR-2',   diag:'SSI',               risk:'medium', adm:'15 May 2024', status:'Improving' },
-    { id:'P-4527', name:'David Martinez',  age:81, ward:'ICU-1',   diag:'ARDS',              risk:'high',   adm:'11 May 2024', status:'Critical' },
-    { id:'P-4528', name:'Jennifer Davis',  age:29, ward:'MED-1',   diag:'HAI – UTI',         risk:'medium', adm:'16 May 2024', status:'Stable' },
-  ];
-  return `
-    <table class="amr-table" style="width:100%">
-      <thead>
-        <tr>
-          <th>ID</th><th>Patient Name</th><th>Age</th><th>Ward</th>
-          <th>Diagnosis</th><th>Risk</th><th>Admitted</th><th>Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows.map(r => `
-          <tr style="cursor:pointer" onclick="alert('Patient ${r.name} – ${r.diag}')">
-            <td style="color:var(--accent-blue)">${r.id}</td>
-            <td style="color:var(--text-primary);font-weight:500">${r.name}</td>
-            <td>${r.age}</td>
-            <td>${r.ward}</td>
-            <td>${r.diag}</td>
-            <td><span class="badge badge-${r.risk}">${r.risk.toUpperCase()}</span></td>
-            <td>${r.adm}</td>
-            <td style="color:${r.status==='Critical'?'#ef5350':r.status==='Improving'?'#66bb6a':'#ffa726'}">${r.status}</td>
-          </tr>`).join('')}
-      </tbody>
-    </table>`;
-}
 
 // ─── INFECTION TRACKING PAGE ──────────────────────────────────
 function renderInfection() {
