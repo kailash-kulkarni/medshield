@@ -7,13 +7,47 @@
 
 // ─── LIVE DATA STORE ──────────────────────────────────────────
 const DATA = {
-  patients:       { value: 1248, change: 12,  dir: 'up',   vs: 'vs last week' },
-  infections:     { value: 86,   change: 8,   dir: 'up',   vs: 'vs last week' },
-  highRisk:       { value: 243,  change: 15,  dir: 'up',   vs: 'vs last week' },
-  icuOccupancy:   { value: 78,   change: 5,   dir: 'up',   vs: 'vs last week', beds: { occ: 312, total: 400 } },
+  patients:       { value: 0,    change: 0,   dir: 'up',   vs: 'vs last week' },
+  infections:     { value: 0,    change: 0,   dir: 'up',   vs: 'vs last week' },
+  highRisk:       { value: 0,    change: 0,   dir: 'up',   vs: 'vs last week' },
+  icuOccupancy:   { value: 0,    change: 5,   dir: 'up',   vs: 'vs last week', beds: { occ: 0, total: 400 } },
   antibioticUsage:{ value: 1562, change: 4,   dir: 'down', vs: 'vs last week' },
   alerts:         { value: 23,   change: null, dir: 'neutral', vs: 'New this week' },
 };
+
+// ─── COMPUTE REAL STATS FROM PATIENTS_DB ─────────────────────
+function computeStatsFromDB() {
+  const db = window.PATIENTS_DB || [];
+  const total = db.length;
+
+  // Active infections: patients NOT discharged whose diagnosis is infection-related
+  const infectionDiags = [
+    'Sepsis','UTI','Pneumonia','Post-op Infection','MRSA','SSI','ARDS','HAI – UTI',
+    'Carbapenem-Resistant Klebsiella','Ventilator-Associated Pneumonia','Bacteremia',
+    'Clostridium difficile Infection','Central Line-Associated BSI','Surgical Site Infection',
+    'Hospital-Acquired Pneumonia','Urinary Catheter Infection','ESBL E. coli',
+    'Methicillin-Resistant S. aureus','Vancomycin-Resistant Enterococcus','COVID-19',
+    'Influenza A','Tuberculosis','Endocarditis','Meningitis','Peritonitis',
+    'Cellulitis','Osteomyelitis','Empyema','Pyelonephritis','Colitis',
+    'Soft Tissue Infection','Wound Infection','Respiratory Syncytial Virus',
+    'Multidrug-Resistant Acinetobacter','Pseudomonas Aeruginosa Infection'
+  ];
+  const activePatients  = db.filter(p => p.status !== 'Discharged');
+  const infections      = activePatients.filter(p => infectionDiags.includes(p.diag)).length;
+  const highRisk        = db.filter(p => p.risk === 'high').length;
+
+  // ICU patients: any ward starting with 'ICU'
+  const icuPatients = db.filter(p => p.ward && p.ward.startsWith('ICU'));
+  const icuOcc      = icuPatients.length;
+  const ICU_TOTAL   = 400;
+  const icuPct      = Math.round((icuOcc / ICU_TOTAL) * 100);
+
+  DATA.patients.value        = total;
+  DATA.infections.value      = infections;
+  DATA.highRisk.value        = highRisk;
+  DATA.icuOccupancy.value    = icuPct;
+  DATA.icuOccupancy.beds.occ = icuOcc;
+}
 
 const AMR_ALERTS = [
   { pathogen: 'Klebsiella pneumoniae', resistance: 'Carbapenem', trend: 'up',   level: 'high' },
@@ -576,13 +610,19 @@ function buildStatCards() {
     { label:'Alerts',              key:'alerts',          icon:'🔔', color:'#ffc107', bg:'rgba(255,193,7,0.15)'  },
   ];
 
+  const total = DATA.patients.value;
+  const inf   = DATA.infections.value;
+  const hr    = DATA.highRisk.value;
+  const icu   = DATA.icuOccupancy.value;
+
+  // Sparklines trail toward the current real value
   const sparklines = {
-    patients:       [1100,1150,1180,1220,1200,1240,1248],
-    infections:     [70,75,78,80,79,83,86],
-    highRisk:       [200,210,220,230,235,240,243],
-    icuOccupancy:   [70,72,74,75,76,77,78],
-    antibioticUsage:[1600,1590,1580,1565,1570,1558,1562],
-    alerts:         [15,18,20,19,22,21,23],
+    patients:       [Math.round(total*0.88),Math.round(total*0.92),Math.round(total*0.94),Math.round(total*0.96),Math.round(total*0.97),Math.round(total*0.99),total],
+    infections:     [Math.round(inf*0.81),Math.round(inf*0.87),Math.round(inf*0.91),Math.round(inf*0.93),Math.round(inf*0.92),Math.round(inf*0.97),inf],
+    highRisk:       [Math.round(hr*0.82),Math.round(hr*0.87),Math.round(hr*0.91),Math.round(hr*0.95),Math.round(hr*0.97),Math.round(hr*0.99),hr],
+    icuOccupancy:   [Math.round(icu*0.90),Math.round(icu*0.92),Math.round(icu*0.95),Math.round(icu*0.96),Math.round(icu*0.97),Math.round(icu*0.99),icu],
+    antibioticUsage:[1600,1590,1580,1565,1570,1558,DATA.antibioticUsage.value],
+    alerts:         [15,18,20,19,22,21,DATA.alerts.value],
   };
 
   const spColors = {
@@ -618,13 +658,18 @@ function buildStatCards() {
 }
 
 function drawSparklines() {
+  const total = DATA.patients.value;
+  const inf   = DATA.infections.value;
+  const hr    = DATA.highRisk.value;
+  const icu   = DATA.icuOccupancy.value;
+
   const sparklines = {
-    patients:       [1100,1150,1180,1220,1200,1240,1248],
-    infections:     [70,75,78,80,79,83,86],
-    highRisk:       [200,210,220,230,235,240,243],
-    icuOccupancy:   [70,72,74,75,76,77,78],
-    antibioticUsage:[1600,1590,1580,1565,1570,1558,1562],
-    alerts:         [15,18,20,19,22,21,23],
+    patients:       [Math.round(total*0.88),Math.round(total*0.92),Math.round(total*0.94),Math.round(total*0.96),Math.round(total*0.97),Math.round(total*0.99),total],
+    infections:     [Math.round(inf*0.81),Math.round(inf*0.87),Math.round(inf*0.91),Math.round(inf*0.93),Math.round(inf*0.92),Math.round(inf*0.97),inf],
+    highRisk:       [Math.round(hr*0.82),Math.round(hr*0.87),Math.round(hr*0.91),Math.round(hr*0.95),Math.round(hr*0.97),Math.round(hr*0.99),hr],
+    icuOccupancy:   [Math.round(icu*0.90),Math.round(icu*0.92),Math.round(icu*0.95),Math.round(icu*0.96),Math.round(icu*0.97),Math.round(icu*0.99),icu],
+    antibioticUsage:[1600,1590,1580,1565,1570,1558,DATA.antibioticUsage.value],
+    alerts:         [15,18,20,19,22,21,DATA.alerts.value],
   };
   const spColors = {
     patients:'#42a5f5', infections:'#ef5350', highRisk:'#ffa726',
@@ -1400,6 +1445,9 @@ function submitAddPatient(e) {
   // Push into dataset
   window.PATIENTS_DB.push(patient);
 
+  // Recompute all stats from the updated DB
+  computeStatsFromDB();
+
   // Brief delay for UX feedback, then close & refresh
   setTimeout(() => {
     closeAddPatientModal();
@@ -1411,6 +1459,7 @@ function submitAddPatient(e) {
     goPatientPage(totalPages);
     // Flash success toast
     showToast(`✓ Patient ${patient.name} (${newId}) added successfully`, 'success');
+    // If overview is pinned in another tab context, keep DATA fresh — already done above
   }, 300);
 }
 
@@ -2057,21 +2106,23 @@ function renderPage(page) {
 
 // ─── LIVE DATA SIMULATION ─────────────────────────────────────
 function simulateLiveData() {
-  // Vary patient count slightly
-  DATA.patients.value   = 1248 + randomBetween(-5, 10);
-  DATA.infections.value = 86   + randomBetween(-2, 3);
-  DATA.highRisk.value   = 243  + randomBetween(-3, 5);
-  DATA.icuOccupancy.value = 78 + randomBetween(-1, 2);
+  // patients, infections, highRisk are always derived from PATIENTS_DB — never randomised
+  // Only secondary metrics that are not directly patient-count-driven vary slightly
   DATA.antibioticUsage.value = 1562 + randomBetween(-10, 10);
-  DATA.alerts.value     = 23   + randomBetween(-1, 2);
+  DATA.alerts.value          = 23   + randomBetween(-1, 2);
 
   if (currentPage === 'overview') {
     // Update stat values live without full re-render
-    const keys = ['patients','infections','highRisk','antibioticUsage','alerts'];
-    keys.forEach(k => {
-      const el = $(`statVal_${k}`);
-      if (el) el.textContent = fmtFull(DATA[k].value);
-    });
+    const el_p = $('statVal_patients');
+    if (el_p) el_p.textContent = fmtFull(DATA.patients.value);
+    const el_i = $('statVal_infections');
+    if (el_i) el_i.textContent = fmtFull(DATA.infections.value);
+    const el_h = $('statVal_highRisk');
+    if (el_h) el_h.textContent = fmtFull(DATA.highRisk.value);
+    const el_ab = $('statVal_antibioticUsage');
+    if (el_ab) el_ab.textContent = fmtFull(DATA.antibioticUsage.value);
+    const el_al = $('statVal_alerts');
+    if (el_al) el_al.textContent = fmtFull(DATA.alerts.value);
     const icuEl = $('statVal_icuOccupancy');
     if (icuEl) icuEl.textContent = DATA.icuOccupancy.value + '%';
 
@@ -2100,6 +2151,7 @@ function simulateLiveData() {
 
 // ─── INIT ─────────────────────────────────────────────────────
 function init() {
+  computeStatsFromDB();          // populate DATA from real PATIENTS_DB before first render
   startClock();
   renderPage('overview');
   setInterval(simulateLiveData, 4000);
