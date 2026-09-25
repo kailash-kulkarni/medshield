@@ -4,8 +4,37 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MediShield AI – Hospital Surveillance Dashboard</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="style.css" />
+  <script src="auth.js"></script>
+  <script>
+    // ── Auth guard: redirect to login if no valid session ──────
+    (function () {
+      const session = window.MediAuth ? window.MediAuth.requireAuth() : null;
+      if (!session) { /* requireAuth() already redirected */ return; }
+      // Patch user pill & sidebar dynamically once DOM is ready
+      document.addEventListener('DOMContentLoaded', function () {
+        const initials = session.initials || session.username.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+        // Sidebar avatar
+        const sideAvatar = document.getElementById('sidebarAvatar');
+        const sideName   = document.getElementById('sidebarName');
+        const sideRole   = document.getElementById('sidebarRole');
+        if (sideAvatar) sideAvatar.textContent = initials;
+        if (sideName)   sideName.textContent   = session.username;
+        if (sideRole)   sideRole.textContent   = session.role;
+        // Topbar pill
+        const pillInit = document.getElementById('pillInitials');
+        const pillName = document.getElementById('pillName');
+        const pillRole = document.getElementById('pillRole');
+        if (pillInit) pillInit.textContent = initials;
+        if (pillName) pillName.textContent = session.username;
+        if (pillRole) pillRole.textContent = session.role;
+        // Wire doctor modal to real session user
+        const pill = document.getElementById('userPill');
+        if (pill) pill.setAttribute('onclick', `openDoctorModal('${session.username}')`);
+      });
+    })();
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
 </head>
 <body>
   <!-- ===== SIDEBAR ===== -->
@@ -73,10 +102,10 @@
     </nav>
 
     <div class="sidebar-user">
-      <div class="user-avatar">DA</div>
+      <div class="user-avatar" id="sidebarAvatar">DA</div>
       <div class="user-info">
-        <span class="user-name">Dr. Admin</span>
-        <span class="user-role">Administrator</span>
+        <span class="user-name" id="sidebarName">Dr. Admin</span>
+        <span class="user-role" id="sidebarRole">Administrator</span>
       </div>
     </div>
 
@@ -125,13 +154,20 @@
           <span class="notif-badge" id="notifBadge">12</span>
         </button>
         <button class="icon-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93A10 10 0 0 0 4.93 19.07"/><path d="M4.93 4.93a10 10 0 0 1 14.14 0"/></svg></button>
-        <div class="user-pill">
-          <div class="user-avatar-sm">DA</div>
+        <div class="user-pill" id="userPill" onclick="openDoctorModal('Dr. Admin')" title="View profile" style="cursor:pointer">
+          <div class="user-avatar-sm" id="pillInitials">DA</div>
           <div>
-            <div class="user-pill-name">Dr. Admin</div>
-            <div class="user-pill-role">Administrator</div>
+            <div class="user-pill-name" id="pillName">Dr. Admin</div>
+            <div class="user-pill-role" id="pillRole">Administrator</div>
           </div>
         </div>
+        <button class="icon-btn logout-btn" onclick="window.MediAuth.logout()" title="Sign out">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <polyline points="16 17 21 12 16 7"/>
+            <line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
+        </button>
       </div>
     </header>
 
