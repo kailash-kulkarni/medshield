@@ -126,20 +126,159 @@ function randomBetween(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-// ─── CLOCK ───────────────────────────────────────────────────
+// ─── CLOCK + LIVE DATE ───────────────────────────────────────
 function startClock() {
+  // Format: "22 Sep 2026"
+  function fmtDate(d) {
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  }
+
+  function updateDate() {
+    const today   = new Date();
+    const rangeEl = $('dateRangeText');
+    if (rangeEl) rangeEl.textContent = fmtDate(today);
+  }
+
   function tick() {
     const now = new Date();
     let h = now.getHours(), m = now.getMinutes(), s = now.getSeconds();
     const ampm = h >= 12 ? 'PM' : 'AM';
     h = h % 12 || 12;
-    const str = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')} ${ampm}`;
+    const str = String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0') + ' ' + ampm;
     const el = $('topbarClock');
     if (el) el.textContent = str;
   }
+
+  updateDate();
   tick();
   setInterval(tick, 1000);
+  // Update date once per minute (handles midnight rollover)
+  setInterval(updateDate, 60000);
 }
+
+// ─── DEPARTMENT FILTER ────────────────────────────────────────
+let activeDept = '';
+
+function handleDeptChange() {
+  const sel = $('deptSelect');
+  if (!sel) return;
+  activeDept = sel.value;
+
+  // Update topbar label colour for Emergency
+  sel.style.color = activeDept === 'Emergency' ? '#ef5350' : '';
+  sel.style.borderColor = activeDept === 'Emergency' ? '#ef5350' : '';
+
+  if (activeDept === 'Emergency') {
+    showDeptPanel('Emergency', 'EMG-1', '#ef5350');
+  } else if (activeDept) {
+    // Map dept names → ward prefixes
+    const deptWardMap = {
+      'ICU':            ['ICU'],
+      'Cardiology':     ['CAR'],
+      'Oncology':       ['ONC'],
+      'Neurology':      ['NEU'],
+      'General Medicine':['GEN','MED'],
+      'Surgery':        ['SUR'],
+      'Microbiology':   ['ISO'],
+      'Pharmacy':       ['MED'],
+    };
+    const prefixes = deptWardMap[activeDept] || [];
+    showDeptPanel(activeDept, prefixes.join('/'), '#42a5f5');
+  } else {
+    // Dismiss panel if "All Departments"
+    const panel = document.getElementById('deptPanel');
+    if (panel) panel.remove();
+  }
+}
+
+function showDeptPanel(deptName, wardHint, color) {
+  const db = window.PATIENTS_DB || [];
+  const deptWardMap = {
+    'Emergency':       ['EMG'],
+    'ICU':             ['ICU'],
+    'Cardiology':      ['CAR'],
+    'Oncology':        ['ONC'],
+    'Neurology':       ['NEU'],
+    'General Medicine':['GEN','MED'],
+    'Surgery':         ['SUR'],
+    'Microbiology':    ['ISO'],
+    'Pharmacy':        ['MED'],
+  };
+  const prefixes = deptWardMap[deptName] || [];
+
+  const deptPatients = prefixes.length
+    ? db.filter(p => prefixes.some(px => p.ward.startsWith(px)))
+    : db;
+
+  const total    = deptPatients.length;
+  const critical = deptPatients.filter(p => p.risk === 'high').length;
+  const stable   = deptPatients.filter(p => p.status === 'Stable').length;
+  const onVent   = deptPatients.filter(p => p.ventilator).length;
+  const top5     = deptPatients.slice(0, 5);
+
+  // Remove existing panel
+  const existing = document.getElementById('deptPanel');
+  if (existing) existing.remove();
+
+  const panel = document.createElement('div');
+  panel.id = 'deptPanel';
+  panel.style.cssText = 'position:fixed;top:70px;right:16px;z-index:500;width:380px;background:var(--bg-card);border:1px solid ' + color + ';border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.5);animation:slideUp 0.25s ease;overflow:hidden';
+
+  const riskBadge = r => {
+    const c = { high:'#ef5350', medium:'#ffa726', low:'#66bb6a' }[r] || '#8b949e';
+    return '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:' + c + '22;color:' + c + ';font-weight:700">' + r.toUpperCase() + '</span>';
+  };
+  const statusC = s => ({ Critical:'#ef5350', Stable:'#66bb6a', Improving:'#29b6f6', 'Under Observation':'#ffa726', Discharged:'#8b949e' }[s] || '#8b949e');
+
+  panel.innerHTML =
+    '<div style="background:' + color + '22;border-bottom:1px solid ' + color + '44;padding:14px 16px;display:flex;align-items:center;justify-content:space-between">' +
+      '<div>' +
+        '<div style="font-size:15px;font-weight:700;color:var(--text-primary)">' + (deptName === 'Emergency' ? '🚨 ' : '🏥 ') + deptName + ' Department</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + total + ' patients · Ward: ' + wardHint + '</div>' +
+      '</div>' +
+      '<button onclick="document.getElementById(\'deptPanel\').remove();document.getElementById(\'deptSelect\').value=\'\';activeDept=\'\'" style="background:none;border:none;color:var(--text-muted);font-size:18px;cursor:pointer;padding:2px 6px;border-radius:6px">✕</button>' +
+    '</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:1px;background:var(--border)">' +
+      _deptStat('Total', total, color) +
+      _deptStat('High Risk', critical, '#ef5350') +
+      _deptStat('Stable', stable, '#66bb6a') +
+      _deptStat('Ventilator', onVent, '#ffa726') +
+    '</div>' +
+    '<div style="padding:10px 16px 6px;font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Recent Patients</div>' +
+    '<div style="padding:0 16px">' +
+      (top5.length === 0
+        ? '<div style="padding:12px 0;text-align:center;color:var(--text-muted);font-size:12px">No patients in this department</div>'
+        : top5.map(p =>
+            '<div onclick="onSearchPatientClick(\'' + p.id + '\')" style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer" onmouseenter="this.style.background=\'var(--bg-card-hover)\'" onmouseleave="this.style.background=\'\'">' +
+              '<div style="display:flex;align-items:center;gap:8px">' +
+                '<div style="width:28px;height:28px;border-radius:50%;background:' + color + '22;color:' + color + ';display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0">' + (p.firstName[0]+p.lastName[0]) + '</div>' +
+                '<div>' +
+                  '<div style="font-size:12px;font-weight:600;color:var(--text-primary)">' + p.name + '</div>' +
+                  '<div style="font-size:10px;color:var(--text-muted)">' + p.ward + ' · ' + p.diag.substring(0,28) + '</div>' +
+                '</div>' +
+              '</div>' +
+              '<div style="text-align:right">' +
+                riskBadge(p.risk) +
+                '<div style="font-size:10px;font-weight:600;color:' + statusC(p.status) + ';margin-top:3px">' + p.status + '</div>' +
+              '</div>' +
+            '</div>'
+          ).join('')
+      ) +
+    '</div>' +
+    '<div style="padding:10px 16px;border-top:1px solid var(--border);text-align:center">' +
+      '<button class="btn btn-primary" style="width:100%;font-size:12px" onclick="navigateTo(\'patients\');onSearchWardClick(document.getElementById(\'deptSelect\').value.replace(\'Emergency\',\'EMG\'));document.getElementById(\'deptPanel\').remove()">View All ' + deptName + ' Patients →</button>' +
+    '</div>';
+
+  document.body.appendChild(panel);
+}
+
+function _deptStat(label, value, color) {
+  return '<div style="background:var(--bg-card);padding:10px 12px;text-align:center">' +
+    '<div style="font-size:18px;font-weight:800;color:' + color + '">' + value + '</div>' +
+    '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">' + label + '</div>' +
+  '</div>';
+}
+
 
 // ─── NAVIGATION ──────────────────────────────────────────────
 function navigateTo(page) {
@@ -162,40 +301,196 @@ function toggleDarkMode() {
   setTimeout(() => renderPage(currentPage), 50);
 }
 
-// ─── SEARCH ──────────────────────────────────────────────────
-const SEARCH_DATA = [
-  { label: 'Patient: John Doe – Room 214', icon: '👤' },
-  { label: 'Ward: ICU-1 – 12 patients', icon: '🏥' },
-  { label: 'Pathogen: E. coli – 120 cases', icon: '🦠' },
-  { label: 'Alert: High Risk Patient #4521', icon: '⚠️' },
-  { label: 'Sample: SG-24567 – SARS-CoV-2', icon: '🧬' },
-  { label: 'Bed: 312/400 Occupied', icon: '🛏️' },
-];
+// ─── GLOBAL SEARCH ────────────────────────────────────────────
+let _searchTimer = null;
 
 function handleSearch() {
-  const val = $('searchInput').value.trim().toLowerCase();
-  const searchBarEl = document.querySelector('.search-bar');
-  let sr = document.querySelector('.search-results');
-  if (!val) { if (sr) sr.remove(); return; }
-  const matches = SEARCH_DATA.filter(d => d.label.toLowerCase().includes(val));
-  if (!matches.length) { if (sr) sr.remove(); return; }
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(_doSearch, 120); // debounce 120ms
+}
+
+function _doSearch() {
+  const input      = $('searchInput');
+  const val        = input ? input.value.trim().toLowerCase() : '';
+  const searchBarEl= document.querySelector('.search-bar');
+  let   sr         = document.querySelector('.search-results');
+
+  // Remove dropdown if query is empty
+  if (!val || val.length < 1) { if (sr) sr.remove(); return; }
+
+  const db       = window.PATIENTS_DB || [];
+  const maxResults = 8;
+
+  // Search patients by name, ID, ward, diagnosis, room, doctor, organism
+  const patients = db.filter(p =>
+    p.name.toLowerCase().includes(val)        ||
+    p.id.toLowerCase().includes(val)          ||
+    p.ward.toLowerCase().includes(val)        ||
+    p.diag.toLowerCase().includes(val)        ||
+    p.roomNo.toLowerCase().includes(val)      ||
+    p.doctor.toLowerCase().includes(val)      ||
+    p.organism.toLowerCase().includes(val)    ||
+    p.status.toLowerCase().includes(val)      ||
+    p.risk.toLowerCase().includes(val)
+  ).slice(0, maxResults);
+
+  // Also match wards as a group
+  const wardMatches = [...new Set(db.filter(p => p.ward.toLowerCase().includes(val)).map(p => p.ward))].slice(0, 3);
+
+  // Create or reuse dropdown
   if (!sr) {
     sr = document.createElement('div');
     sr.className = 'search-results';
+    sr.style.cssText = 'position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:9999;background:var(--bg-card);border:1px solid var(--border-light);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.5);overflow:hidden;max-height:420px;overflow-y:auto';
     searchBarEl.appendChild(sr);
   }
-  sr.innerHTML = matches.map(m => `<div class="sr-item" onclick="closeSearch()">${m.icon} ${m.label}</div>`).join('');
+
+  if (!patients.length && !wardMatches.length) {
+    sr.innerHTML = '<div style="padding:16px 14px;text-align:center;color:var(--text-muted);font-size:12px">No results found for <strong style="color:var(--text-primary)">"' + val + '"</strong></div>';
+    return;
+  }
+
+  const riskColor = { high:'#ef5350', medium:'#ffa726', low:'#66bb6a' };
+  const statusColor = { Critical:'#ef5350', Stable:'#ffa726', Improving:'#66bb6a', 'Under Observation':'#29b6f6', Discharged:'#8b949e' };
+
+  let html = '';
+
+  // Header
+  if (patients.length) {
+    html += '<div style="padding:8px 14px 4px;font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.6px;border-bottom:1px solid var(--border)">Patients (' + patients.length + (patients.length === maxResults ? '+' : '') + ')</div>';
+
+    html += patients.map(p => {
+      const rc = riskColor[p.risk] || '#8b949e';
+      const sc = statusColor[p.status] || '#8b949e';
+      const initials = (p.firstName[0] + p.lastName[0]).toUpperCase();
+      // Highlight matched portion
+      const displayName = _highlight(p.name, val);
+      const displayId   = _highlight(p.id, val);
+      const displayDiag = _highlight(p.diag, val);
+
+      return '<div class="sr-patient-row" onclick="onSearchPatientClick(\'' + p.id + '\')" style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background=\'var(--bg-card-hover)\'" onmouseleave="this.style.background=\'\'">' +
+        '<div style="width:34px;height:34px;border-radius:50%;background:' + rc + '22;border:2px solid ' + rc + ';display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:' + rc + ';flex-shrink:0">' + initials + '</div>' +
+        '<div style="flex:1;min-width:0">' +
+          '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">' +
+            '<span style="font-size:13px;font-weight:600;color:var(--text-primary)">' + displayName + '</span>' +
+            '<span style="font-size:10px;color:var(--accent-blue);font-weight:500">' + displayId + '</span>' +
+            '<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:' + rc + '22;color:' + rc + ';font-weight:700">' + p.risk.toUpperCase() + '</span>' +
+          '</div>' +
+          '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
+            p.ward + ' · Room ' + p.roomNo + ' · ' + displayDiag +
+          '</div>' +
+        '</div>' +
+        '<div style="text-align:right;flex-shrink:0">' +
+          '<div style="font-size:11px;font-weight:600;color:' + sc + '">' + p.status + '</div>' +
+          '<div style="font-size:10px;color:var(--text-muted)">' + p.age + ' yrs · ' + p.gender + '</div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  // Ward group results
+  if (wardMatches.length) {
+    html += '<div style="padding:8px 14px 4px;font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.6px;border-bottom:1px solid var(--border);border-top:' + (patients.length ? '1px solid var(--border)' : 'none') + '">Wards</div>';
+    html += wardMatches.map(w => {
+      const count = (window.PATIENTS_DB || []).filter(p => p.ward === w).length;
+      return '<div onclick="onSearchWardClick(\'' + w + '\')" style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);transition:background 0.15s" onmouseenter="this.style.background=\'var(--bg-card-hover)\'" onmouseleave="this.style.background=\'\'">' +
+        '<div style="width:34px;height:34px;border-radius:8px;background:rgba(66,165,245,0.15);display:flex;align-items:center;justify-content:center;font-size:16px">🏥</div>' +
+        '<div>' +
+          '<div style="font-size:13px;font-weight:600;color:var(--text-primary)">' + _highlight(w, val) + '</div>' +
+          '<div style="font-size:11px;color:var(--text-muted)">' + count + ' patient' + (count !== 1 ? 's' : '') + '</div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  // Footer hint
+  if (patients.length > 0) {
+    html += '<div style="padding:8px 14px;font-size:11px;color:var(--text-muted);text-align:center">Click a patient to view full details · <span style="color:var(--accent-blue);cursor:pointer" onclick="onSearchViewAll(\'' + val + '\')">View all results →</span></div>';
+  }
+
+  sr.innerHTML = html;
+}
+
+// Highlight matched substring in text
+function _highlight(text, query) {
+  if (!query) return text;
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return text;
+  return text.slice(0, idx) +
+    '<mark style="background:rgba(79,195,247,0.3);color:var(--text-primary);border-radius:2px;padding:0 1px">' +
+    text.slice(idx, idx + query.length) +
+    '</mark>' +
+    text.slice(idx + query.length);
+}
+
+// Called when user clicks a patient in search results
+function onSearchPatientClick(patientId) {
+  closeSearch();
+  // Navigate to Patient Surveillance if not there
+  if (currentPage !== 'patients') {
+    navigateTo('patients');
+    // Wait for page to render then open modal
+    setTimeout(() => openPatientModal(patientId), 400);
+  } else {
+    openPatientModal(patientId);
+  }
+}
+
+// Called when user clicks a ward in search results
+function onSearchWardClick(wardOrDept) {
+  closeSearch();
+  // Map dept name to ward prefix if needed
+  const deptWardMap = {
+    'Emergency':'EMG','ICU':'ICU','Cardiology':'CAR','Oncology':'ONC',
+    'Neurology':'NEU','General Medicine':'GEN','Surgery':'SUR','Microbiology':'ISO'
+  };
+  const mapped = deptWardMap[wardOrDept] || wardOrDept;
+  navigateTo('patients');
+  setTimeout(() => {
+    const wf = $('ptWardFilter');
+    const si = $('ptSearch');
+    // Try exact ward match first
+    if (wf) {
+      const opts = Array.from(wf.options).map(o => o.value);
+      const exact = opts.find(o => o === wardOrDept);
+      if (exact) {
+        wf.value = exact;
+      } else {
+        // Use search box with prefix
+        wf.value = '';
+        if (si) si.value = mapped;
+      }
+    }
+    if (si && !si.value) si.value = '';
+    filterPatients();
+  }, 400);
+}
+
+// View all matching patients in Patient Surveillance page
+function onSearchViewAll(query) {
+  closeSearch();
+  navigateTo('patients');
+  setTimeout(() => {
+    const si = $('ptSearch');
+    if (si) { si.value = query; filterPatients(); }
+  }, 400);
 }
 
 function closeSearch() {
-  $('searchInput').value = '';
+  const inp = $('searchInput');
+  if (inp) inp.value = '';
   const sr = document.querySelector('.search-results');
   if (sr) sr.remove();
 }
 
 document.addEventListener('click', e => {
-  if (!e.target.closest('.search-bar')) closeSearch();
+  if (!e.target.closest('.search-bar') && !e.target.closest('.search-results')) closeSearch();
 });
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeSearch();
+});
+
 
 // ─── SPARKLINE ───────────────────────────────────────────────
 function drawSparkline(canvas, data, color) {
@@ -647,7 +942,7 @@ function buildStatCards() {
           <div class="stat-card-icon" style="background:${c.bg}">${c.icon}</div>
         </div>
         <div class="stat-card-value" id="statVal_${c.key}">${val}</div>
-        ${sub ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${sub}</div>` : ''}
+        ${sub ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">' + sub + '</div>' : ''}
         <div class="stat-card-footer">
           ${changeHtml}
           <span class="stat-vs">${d.vs}</span>
@@ -1037,7 +1332,7 @@ function openPatientModal(id) {
             </div>
             <div style="display:flex;gap:8px">
               <button class="btn btn-outline" style="font-size:12px" onclick="closePatientModal()">Close</button>
-              <button class="btn btn-primary" style="font-size:12px">Generate Report</button>
+              <button class="btn btn-primary" style="font-size:12px" onclick="generatePatientReport('${p.id}')">⬇ Generate Report</button>
             </div>
           </div>
         </div>
@@ -1485,6 +1780,396 @@ function showToast(msg, type) {
   setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.4s'; setTimeout(() => toast.remove(), 400); }, 3500);
 }
 
+// ─── PATIENT PDF REPORT GENERATOR ────────────────────────────
+async function generatePatientReport(patientId) {
+  const p = (window.PATIENTS_DB || []).find(x => x.id === patientId);
+  if (!p) { showToast('Patient not found', 'error'); return; }
+
+  // Show loading state on button
+  const btn = document.querySelector('.modal-box .btn-primary');
+  const origText = btn ? btn.textContent : '';
+  if (btn) { btn.textContent = 'Generating…'; btn.disabled = true; }
+
+  // Wait for jsPDF to be available
+  if (!window.jspdf) { showToast('PDF library not loaded – check internet connection', 'error'); if (btn) { btn.textContent = origText; btn.disabled = false; } return; }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+  const PW = 210, PH = 297;
+  const ML = 15, MR = 15, MT = 15;
+  const CW = PW - ML - MR;  // content width = 180mm
+  let Y = MT;
+
+  // ── Colour palette ──────────────────────────────────────────
+  const C = {
+    navy:    [13, 27, 42],
+    blue:    [21, 101, 192],
+    cyan:    [2, 136, 209],
+    red:     [239, 83, 80],
+    orange:  [255, 152, 0],
+    green:   [76, 175, 80],
+    purple:  [156, 39, 176],
+    grey:    [100, 116, 139],
+    lightBg: [240, 244, 248],
+    cardBg:  [248, 250, 252],
+    border:  [226, 232, 240],
+    white:   [255, 255, 255],
+    text:    [30, 41, 59],
+    muted:   [100, 116, 139],
+  };
+
+  const riskColor = { high: C.red, medium: C.orange, low: C.green }[p.risk] || C.grey;
+  const statusColor = { Critical: C.red, Stable: C.orange, Improving: C.green, 'Under Observation': [41,182,246], Discharged: C.grey }[p.status] || C.grey;
+
+  // ── Helper functions ─────────────────────────────────────────
+  function setFont(size, style = 'normal', color = C.text) {
+    doc.setFontSize(size);
+    doc.setFont('helvetica', style);
+    doc.setTextColor(...color);
+  }
+  function drawRect(x, y, w, h, fillColor, radius = 0) {
+    doc.setFillColor(...fillColor);
+    doc.setDrawColor(...fillColor);
+    if (radius > 0) doc.roundedRect(x, y, w, h, radius, radius, 'F');
+    else doc.rect(x, y, w, h, 'F');
+  }
+  function drawBorderRect(x, y, w, h, fillColor, strokeColor, radius = 2) {
+    doc.setFillColor(...fillColor);
+    doc.setDrawColor(...strokeColor);
+    doc.setLineWidth(0.3);
+    doc.roundedRect(x, y, w, h, radius, radius, 'FD');
+  }
+  function hLine(y, color = C.border) {
+    doc.setDrawColor(...color);
+    doc.setLineWidth(0.3);
+    doc.line(ML, y, PW - MR, y);
+  }
+  function sectionTitle(text, yPos) {
+    drawRect(ML, yPos, CW, 7, C.blue, 1);
+    setFont(9, 'bold', C.white);
+    doc.text(text, ML + 3, yPos + 5);
+    return yPos + 7;
+  }
+  function labelValue(label, value, x, y, w) {
+    drawBorderRect(x, y, w, 14, C.cardBg, C.border, 2);
+    setFont(7, 'normal', C.muted);
+    doc.text(label.toUpperCase(), x + 3, y + 5);
+    setFont(9, 'bold', C.text);
+    doc.text(String(value || '—').substring(0, 28), x + 3, y + 11);
+  }
+  function vitalCard(label, value, unit, color, x, y, w, h = 20) {
+    drawBorderRect(x, y, w, h, C.cardBg, C.border, 2);
+    // colored left stripe
+    drawRect(x, y, 2, h, color, 1);
+    setFont(7, 'normal', C.muted);
+    doc.text(label.toUpperCase(), x + 5, y + 5.5);
+    setFont(13, 'bold', color);
+    doc.text(String(value), x + 5, y + 13.5);
+    setFont(7, 'normal', C.muted);
+    doc.text(unit, x + 5, y + 18.5);
+  }
+  function badge(text, color, x, y) {
+    const tw = doc.getTextWidth(text) + 4;
+    drawRect(x, y - 4, tw, 5.5, color.map(c => Math.min(255, c + 180)), 1);
+    doc.setTextColor(...color);
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'bold');
+    doc.text(text, x + 2, y);
+    return x + tw + 2;
+  }
+  function gaugeBar(label, value, max, color, x, y, w) {
+    const pct = Math.min(1, value / max);
+    setFont(7.5, 'normal', C.muted);
+    doc.text(label, x, y + 3);
+    drawRect(x, y + 4.5, w, 4, C.border, 1);
+    drawRect(x, y + 4.5, w * pct, 4, color, 1);
+    setFont(7.5, 'bold', color);
+    doc.text(`${value}`, x + w + 2, y + 8);
+    return y + 11;
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // PAGE 1
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  // ── Header banner ────────────────────────────────────────────
+  drawRect(0, 0, PW, 32, C.navy, 0);
+  // Logo area
+  drawRect(ML, 8, 14, 14, C.blue, 2);
+  setFont(9, 'bold', C.white);
+  doc.text('M+', ML + 3, 17);
+  // Title
+  setFont(15, 'bold', C.white);
+  doc.text('MediShield AI', ML + 17, 12);
+  setFont(8, 'normal', [176, 190, 197]);
+  doc.text('Hospital Surveillance System  •  Patient Clinical Report', ML + 17, 18);
+  // Date generated
+  const genDate = new Date().toLocaleString('en-GB', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  setFont(7, 'normal', [176, 190, 197]);
+  doc.text(`Generated: ${genDate}`, PW - MR - doc.getTextWidth(`Generated: ${genDate}`), 18);
+  // Cyan accent line
+  drawRect(0, 30, PW, 2, C.cyan, 0);
+  Y = 38;
+
+  // ── Patient identity card ─────────────────────────────────────
+  drawBorderRect(ML, Y, CW, 28, C.cardBg, C.border, 3);
+  // Avatar circle
+  doc.setFillColor(...C.blue);
+  doc.circle(ML + 14, Y + 14, 10, 'F');
+  setFont(10, 'bold', C.white);
+  const initials = (p.firstName[0] + p.lastName[0]).toUpperCase();
+  doc.text(initials, ML + 14 - doc.getTextWidth(initials) / 2, Y + 17);
+  // Name + ID
+  setFont(14, 'bold', C.text);
+  doc.text(p.name, ML + 28, Y + 9);
+  setFont(8, 'normal', C.muted);
+  doc.text(`${p.id}  |  ${p.ward} – Room ${p.roomNo}  |  Attending: ${p.doctor}`, ML + 28, Y + 15);
+  // Badges
+  let bx = ML + 28;
+  bx = badge(p.risk.toUpperCase() + ' RISK', riskColor, bx, Y + 22);
+  badge(p.status.toUpperCase(), statusColor, bx, Y + 22);
+  // Right-side quick stats
+  const qs = [[p.age + ' yrs', 'Age'], [p.gender, 'Gender'], [p.blood, 'Blood'], [p.los + 'd', 'LOS']];
+  qs.forEach((item, i) => {
+    const qx = PW - MR - 14 - (qs.length - 1 - i) * 16;
+    setFont(10, 'bold', C.blue);
+    doc.text(item[0], qx, Y + 11);
+    setFont(7, 'normal', C.muted);
+    doc.text(item[1], qx, Y + 16);
+  });
+  Y += 34;
+
+  // ── Clinical Information ──────────────────────────────────────
+  Y = sectionTitle('CLINICAL INFORMATION', Y) + 3;
+  const cols3 = CW / 3 - 1;
+  labelValue('Primary Diagnosis', p.diag,                        ML,                    Y, cols3);
+  labelValue('Infection Site',    p.infectionSite,                ML + cols3 + 1.5,      Y, cols3);
+  labelValue('Causative Organism',p.organism,                     ML + (cols3 + 1.5) * 2, Y, cols3);
+  Y += 17;
+  labelValue('Comorbidities',     p.comorbid,                     ML,                    Y, cols3);
+  labelValue('Current Antibiotic',p.antibiotic,                   ML + cols3 + 1.5,      Y, cols3);
+  labelValue('Admission Date',    p.adm,                          ML + (cols3 + 1.5) * 2, Y, cols3);
+  Y += 17;
+  const cols4 = CW / 4 - 1;
+  labelValue('SOFA Score',   p.sofa,                              ML,                    Y, cols4);
+  labelValue('NEWS2 Score',  p.news2,                             ML + cols4 + 1.3,      Y, cols4);
+  labelValue('Ventilator',   p.ventilator ? 'YES – Active' : 'No', ML + (cols4 + 1.3)*2,  Y, cols4);
+  labelValue('Isolation',    p.isolation  ? 'YES' : 'No',          ML + (cols4 + 1.3)*3,  Y, cols4);
+  Y += 20;
+
+  // ── Vitals ───────────────────────────────────────────────────
+  Y = sectionTitle('CURRENT VITALS', Y) + 3;
+  const vw = CW / 3 - 1;
+  const vitals = [
+    { label: 'Blood Pressure', value: p.vitals.bp,   unit: 'mmHg',          color: parseInt(p.vitals.bp) < 90 ? C.red : C.blue },
+    { label: 'Heart Rate',     value: p.vitals.hr,   unit: 'bpm',           color: p.vitals.hr > 120 ? C.red : p.vitals.hr > 100 ? C.orange : C.green },
+    { label: 'SpO₂',           value: p.vitals.spo2 + '%', unit: 'Oxygen Saturation', color: p.vitals.spo2 < 90 ? C.red : p.vitals.spo2 < 94 ? C.orange : C.green },
+    { label: 'Resp. Rate',     value: p.vitals.rr,   unit: 'breaths / min', color: p.vitals.rr > 25 ? C.red : C.blue },
+    { label: 'Temperature',    value: p.vitals.temp + '°C', unit: 'Body Temperature', color: parseFloat(p.vitals.temp) > 38.5 ? C.red : parseFloat(p.vitals.temp) > 37.5 ? C.orange : C.green },
+    { label: 'GCS Score',      value: p.vitals.gcs,  unit: 'Glasgow Coma Scale', color: p.vitals.gcs < 9 ? C.red : p.vitals.gcs < 13 ? C.orange : C.green },
+  ];
+  vitals.forEach((v, i) => {
+    const col = i % 3;
+    const row = Math.floor(i / 3);
+    vitalCard(v.label, v.value, v.unit, v.color, ML + col * (vw + 1.5), Y + row * 24, vw);
+  });
+  Y += 52;
+
+  // ── Risk Summary ─────────────────────────────────────────────
+  Y = sectionTitle('RISK SUMMARY & CLINICAL ASSESSMENT', Y) + 3;
+  drawBorderRect(ML, Y, CW, 22, riskColor.map(c => Math.min(255, c + 200)), riskColor, 2);
+  doc.setFillColor(...riskColor);
+  doc.circle(ML + 10, Y + 11, 7, 'F');
+  setFont(11, 'bold', C.white);
+  const riskLetter = p.risk[0].toUpperCase();
+  doc.text(riskLetter, ML + 10 - doc.getTextWidth(riskLetter) / 2, Y + 14);
+  setFont(11, 'bold', riskColor);
+  doc.text(`${p.risk.charAt(0).toUpperCase() + p.risk.slice(1)} Risk Patient`, ML + 20, Y + 9);
+  setFont(8.5, 'normal', C.text);
+  doc.text(`SOFA Score: ${p.sofa}   |   NEWS2 Score: ${p.news2}   |   Status: ${p.status}   |   Ventilator: ${p.ventilator ? 'YES' : 'No'}   |   Isolation: ${p.isolation ? 'YES' : 'No'}`, ML + 20, Y + 15);
+  Y += 28;
+
+  // ── Severity Gauge Bars ──────────────────────────────────────
+  Y = sectionTitle('SEVERITY INDICATORS', Y) + 4;
+  const halfW = (CW - 6) / 2;
+  Y = gaugeBar('SOFA Score (0–24)',  p.sofa,  24, p.sofa >= 10 ? C.red : p.sofa >= 6 ? C.orange : C.green,  ML,               Y, halfW);
+  let Y2 = Y - 11;
+  Y2 = gaugeBar('NEWS2 Score (0–20)',p.news2, 20, p.news2 >= 7 ? C.red : p.news2 >= 3 ? C.orange : C.green, ML + halfW + 6,  Y2, halfW);
+  Y = Math.max(Y, Y2) + 2;
+  Y = gaugeBar('SpO₂ (50–100%)',     p.vitals.spo2, 100, p.vitals.spo2 < 90 ? C.red : p.vitals.spo2 < 94 ? C.orange : C.green, ML, Y, halfW);
+  Y2 = Y - 11;
+  Y2 = gaugeBar('GCS Score (3–15)',  p.vitals.gcs,  15,  p.vitals.gcs < 9 ? C.red : p.vitals.gcs < 13 ? C.orange : C.green, ML + halfW + 6, Y2, halfW);
+  Y = Math.max(Y, Y2) + 2;
+  Y = gaugeBar('Heart Rate (0–200)', p.vitals.hr,   200, p.vitals.hr > 120 ? C.red : p.vitals.hr > 100 ? C.orange : C.green, ML, Y, halfW);
+  Y2 = Y - 11;
+  Y2 = gaugeBar('Temp (32–43°C)',    parseFloat(p.vitals.temp) * 10, 430, parseFloat(p.vitals.temp) > 38.5 ? C.red : C.orange, ML + halfW + 6, Y2, halfW);
+  Y = Math.max(Y, Y2) + 4;
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // PAGE 2 – VITALS CHART
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  doc.addPage();
+  drawRect(0, 0, PW, 16, C.navy, 0);
+  drawRect(0, 14, PW, 2, C.cyan, 0);
+  setFont(11, 'bold', C.white);
+  doc.text('MediShield AI  –  Vitals & Risk Charts', ML, 11);
+  setFont(8, 'normal', [176,190,197]);
+  doc.text(`Patient: ${p.name}  |  ${p.id}`, PW - MR - doc.getTextWidth(`Patient: ${p.name}  |  ${p.id}`), 11);
+  Y = 24;
+
+  // ── Draw vitals chart via off-screen canvas ──────────────────
+  const chartCanvas = document.createElement('canvas');
+  chartCanvas.width  = 900;
+  chartCanvas.height = 380;
+  document.body.appendChild(chartCanvas);
+
+  const vNames = ['Heart Rate\n(bpm)', 'SpO₂\n(%)', 'Resp Rate\n(/min)', 'Temp\n(°C×10)', 'GCS\n(score)', 'SOFA\n(score)', 'NEWS2\n(score)'];
+  const vValues = [p.vitals.hr, p.vitals.spo2, p.vitals.rr, parseFloat(p.vitals.temp) * 10, p.vitals.gcs, p.sofa, p.news2];
+  const vNormals= [80, 98, 16, 370, 15, 0, 0]; // reference normals
+  const vColors = vValues.map((v, i) => {
+    if (i === 0) return v > 120 ? '#ef5350' : v > 100 ? '#ffa726' : '#66bb6a';
+    if (i === 1) return v < 90  ? '#ef5350' : v < 94  ? '#ffa726' : '#66bb6a';
+    if (i === 2) return v > 25  ? '#ef5350' : '#42a5f5';
+    if (i === 3) return v > 385 ? '#ef5350' : v > 375 ? '#ffa726' : '#66bb6a';
+    if (i === 4) return v < 9   ? '#ef5350' : v < 13  ? '#ffa726' : '#66bb6a';
+    if (i === 5) return v >= 10 ? '#ef5350' : v >= 6  ? '#ffa726' : '#66bb6a';
+    if (i === 6) return v >= 7  ? '#ef5350' : v >= 3  ? '#ffa726' : '#66bb6a';
+    return '#42a5f5';
+  });
+
+  const vitalsChart = new Chart(chartCanvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: vNames,
+      datasets: [
+        {
+          label: 'Patient Value',
+          data: vValues,
+          backgroundColor: vColors,
+          borderRadius: 6,
+          borderSkipped: false,
+        },
+        {
+          label: 'Normal Reference',
+          data: vNormals,
+          backgroundColor: 'rgba(79,195,247,0.25)',
+          borderColor: 'rgba(79,195,247,0.8)',
+          borderWidth: 2,
+          borderRadius: 4,
+          borderSkipped: false,
+          type: 'bar',
+        }
+      ]
+    },
+    options: {
+      responsive: false,
+      animation: false,
+      plugins: {
+        legend: { display: true, labels: { color: '#334155', font: { size: 12 }, boxWidth: 14 } },
+        title: { display: true, text: 'Patient Vitals vs Normal Reference', color: '#1e293b', font: { size: 15, weight: 'bold' }, padding: { bottom: 16 } }
+      },
+      scales: {
+        x: { grid: { color: '#e2e8f0' }, ticks: { color: '#64748b', font: { size: 10 } } },
+        y: { grid: { color: '#e2e8f0' }, ticks: { color: '#64748b', font: { size: 10 } }, beginAtZero: true }
+      }
+    }
+  });
+
+  await new Promise(r => setTimeout(r, 300));
+  const vitalsImgData = chartCanvas.toDataURL('image/png');
+  vitalsChart.destroy();
+  document.body.removeChild(chartCanvas);
+
+  // Add chart to PDF
+  Y = sectionTitle('VITALS CHART (Patient vs Normal Reference)', Y) + 4;
+  doc.addImage(vitalsImgData, 'PNG', ML, Y, CW, 80);
+  Y += 85;
+
+  // ── Donut-style risk visual using canvas ─────────────────────
+  const riskCanvas = document.createElement('canvas');
+  riskCanvas.width  = 600;
+  riskCanvas.height = 300;
+  document.body.appendChild(riskCanvas);
+
+  const riskChart = new Chart(riskCanvas.getContext('2d'), {
+    type: 'doughnut',
+    data: {
+      labels: ['High Risk', 'Medium Risk', 'Low Risk'],
+      datasets: [{
+        data: [
+          p.risk === 'high'   ? 1 : 0,
+          p.risk === 'medium' ? 1 : 0,
+          p.risk === 'low'    ? 1 : 0,
+        ],
+        backgroundColor: ['#ef5350','#ffa726','#66bb6a'],
+        borderColor: ['#ef5350','#ffa726','#66bb6a'],
+        hoverOffset: 4,
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: false,
+      animation: false,
+      cutout: '65%',
+      plugins: {
+        legend: { display: true, position: 'right', labels: { color: '#334155', font: { size: 13 }, padding: 20 } },
+        title: { display: true, text: `Risk Classification: ${p.risk.toUpperCase()} RISK`, color: '#1e293b', font: { size: 14, weight: 'bold' }, padding: { bottom: 10 } }
+      }
+    }
+  });
+
+  await new Promise(r => setTimeout(r, 300));
+  const riskImgData = riskCanvas.toDataURL('image/png');
+  riskChart.destroy();
+  document.body.removeChild(riskCanvas);
+
+  // Add risk donut
+  Y = sectionTitle('RISK CLASSIFICATION', Y) + 4;
+  doc.addImage(riskImgData, 'PNG', ML + CW / 4, Y, CW / 2, 50);
+  Y += 55;
+
+  // ── Severity scores radar-style using horizontal bars ────────
+  Y = sectionTitle('SEVERITY SCORE BREAKDOWN', Y) + 4;
+  const scores = [
+    { name: 'SOFA Score',      val: p.sofa,  max: 24, color: p.sofa >= 10 ? C.red : p.sofa >= 6 ? C.orange : C.green },
+    { name: 'NEWS2 Score',     val: p.news2, max: 20, color: p.news2 >= 7 ? C.red : p.news2 >= 3 ? C.orange : C.green },
+    { name: 'Heart Rate',      val: Math.min(p.vitals.hr, 200),  max: 200, color: p.vitals.hr > 120 ? C.red : C.green },
+    { name: 'SpO₂',            val: p.vitals.spo2, max: 100, color: p.vitals.spo2 < 90 ? C.red : C.green },
+    { name: 'Respiratory Rate',val: p.vitals.rr, max: 60, color: p.vitals.rr > 25 ? C.red : C.green },
+    { name: 'GCS',             val: p.vitals.gcs, max: 15, color: p.vitals.gcs < 9 ? C.red : C.green },
+  ];
+  scores.forEach((s, i) => {
+    const by = Y + i * 12;
+    setFont(7.5, 'normal', C.text);
+    doc.text(s.name, ML, by + 5);
+    const barX = ML + 38, barW = CW - 50;
+    drawRect(barX, by + 1.5, barW, 5, C.border, 1);
+    const fillW = barW * Math.min(1, s.val / s.max);
+    drawRect(barX, by + 1.5, fillW, 5, s.color, 1);
+    setFont(7.5, 'bold', s.color);
+    doc.text(`${s.val} / ${s.max}`, barX + barW + 2, by + 6);
+  });
+  Y += scores.length * 12 + 6;
+
+  // ── Footer ───────────────────────────────────────────────────
+  const totalPages = doc.getNumberOfPages();
+  for (let pg = 1; pg <= totalPages; pg++) {
+    doc.setPage(pg);
+    drawRect(0, PH - 12, PW, 12, C.navy, 0);
+    setFont(7, 'normal', [176, 190, 197]);
+    doc.text(`MediShield AI – Confidential Patient Report  |  ${p.name}  |  ${p.id}`, ML, PH - 5);
+    doc.text(`Page ${pg} of ${totalPages}`, PW - MR - doc.getTextWidth(`Page ${pg} of ${totalPages}`), PH - 5);
+  }
+
+  // ── Save ─────────────────────────────────────────────────────
+  const safeName = p.name.replace(/\s+/g, '_');
+  doc.save(`MediShield_Report_${p.id}_${safeName}.pdf`);
+
+  if (btn) { btn.textContent = origText; btn.disabled = false; }
+  showToast(`✓ Report downloaded: ${p.id}_${safeName}.pdf`, 'success');
+}
+
 function buildMiniStatCard(label, value, change, dir, color) {
   return `
     <div class="stat-card">
@@ -1890,7 +2575,7 @@ function renderReports() {
             </div>
             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
               <span class="badge ${r.status==='Ready'?'badge-low':'badge-medium'}">${r.status}</span>
-              ${r.status==='Ready'?`<button class="btn btn-outline" style="padding:4px 10px;font-size:11px">Download</button>`:''}
+              ${r.status==='Ready' ? '<button class="btn btn-outline" style="padding:4px 10px;font-size:11px">Download</button>' : ''}
             </div>
           </div>
         </div>`).join('')}
@@ -1950,47 +2635,326 @@ function renderAnalytics() {
   });
 }
 
+// ─── USER MANAGEMENT DATA STORE ──────────────────────────────
+if (!window.USERS_DB) {
+  window.USERS_DB = [
+    { id:'U-001', name:'Dr. Admin',      email:'admin@medshield.ai',      role:'Administrator',     dept:'All',          phone:'+1-555-0100', last:'Just now',   status:'Online',  joined:'01 Jan 2023' },
+    { id:'U-002', name:'Dr. Sarah Kim',  email:'s.kim@medshield.ai',      role:'Infection Control', dept:'Microbiology', phone:'+1-555-0101', last:'5 min ago',  status:'Online',  joined:'15 Mar 2023' },
+    { id:'U-003', name:'Nurse Johnson',  email:'n.johnson@medshield.ai',  role:'ICU Nurse',         dept:'ICU',          phone:'+1-555-0102', last:'12 min ago', status:'Online',  joined:'20 Apr 2023' },
+    { id:'U-004', name:'Dr. Patel',      email:'r.patel@medshield.ai',    role:'Intensivist',       dept:'ICU',          phone:'+1-555-0103', last:'1 hr ago',   status:'Away',    joined:'10 Jun 2023' },
+    { id:'U-005', name:'Lab Tech Brown', email:'l.brown@medshield.ai',    role:'Lab Technician',    dept:'Laboratory',   phone:'+1-555-0104', last:'2 hr ago',   status:'Offline', joined:'05 Sep 2023' },
+  ];
+}
+
 // ─── USER MANAGEMENT PAGE ─────────────────────────────────────
 function renderUserMgmt() {
   const content = $('pageContent');
-  const users = [
-    { name:'Dr. Admin',      role:'Administrator',     dept:'All',          last:'Just now',      status:'Online' },
-    { name:'Dr. Sarah Kim',  role:'Infection Control', dept:'Microbiology', last:'5 min ago',     status:'Online' },
-    { name:'Nurse Johnson',  role:'ICU Nurse',         dept:'ICU',          last:'12 min ago',    status:'Online' },
-    { name:'Dr. Patel',      role:'Intensivist',       dept:'ICU',          last:'1 hr ago',      status:'Away' },
-    { name:'Lab Tech Brown', role:'Lab Technician',    dept:'Laboratory',   last:'2 hr ago',      status:'Offline' },
-  ];
+  const users   = window.USERS_DB;
+
   content.innerHTML = `
     <div class="section-page-header fade-in">
       <div>
         <div class="section-page-title">User Management</div>
         <div class="page-subtitle">Manage roles, permissions, and access control</div>
       </div>
-      <button class="btn btn-primary">+ Add User</button>
+      <button class="btn btn-primary" onclick="openAddUserModal()">＋ Add User</button>
     </div>
     <div class="card fade-in">
-      <div class="card-header"><div class="card-title">Users (${users.length})</div></div>
-      <div class="card-body" style="padding:0">
-        <table class="amr-table" style="width:100%">
-          <thead><tr><th>Name</th><th>Role</th><th>Department</th><th>Last Active</th><th>Status</th><th>Actions</th></tr></thead>
-          <tbody>
-            ${users.map(u => `
-              <tr>
-                <td style="font-weight:500;color:var(--text-primary);padding:10px 8px">
-                  <div style="display:flex;align-items:center;gap:8px">
-                  <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#1976d2,#42a5f5);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">${u.name.split(' ').map(w=>w[0]).join('').slice(0,2)}</div>
-                  ${u.name}</div>
-                </td>
-                <td>${u.role}</td>
-                <td>${u.dept}</td>
-                <td style="color:var(--text-muted)">${u.last}</td>
-                <td><span class="badge ${u.status==='Online'?'badge-low':u.status==='Away'?'badge-medium':'badge-info'}">${u.status}</span></td>
-                <td><button class="btn btn-outline" style="padding:3px 8px;font-size:11px">Edit</button></td>
-              </tr>`).join('')}
-          </tbody>
-        </table>
+      <div class="card-header" style="flex-wrap:wrap;gap:10px">
+        <div class="card-title" id="userCountTitle">Users (${users.length})</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input type="text" id="userSearch" placeholder="Search name, email, role..." oninput="filterUsers()"
+            style="background:var(--bg-secondary);border:1px solid var(--border);color:var(--text-primary);border-radius:6px;padding:6px 10px;font-size:12px;outline:none;width:220px" />
+          <select id="userStatusFilter" onchange="filterUsers()"
+            style="background:var(--bg-secondary);border:1px solid var(--border);color:var(--text-primary);border-radius:6px;padding:6px 8px;font-size:12px;outline:none">
+            <option value="">All Statuses</option>
+            <option>Online</option><option>Away</option><option>Offline</option>
+          </select>
+          <select id="userRoleFilter" onchange="filterUsers()"
+            style="background:var(--bg-secondary);border:1px solid var(--border);color:var(--text-primary);border-radius:6px;padding:6px 8px;font-size:12px;outline:none">
+            <option value="">All Roles</option>
+            ${[...new Set(users.map(u=>u.role))].map(r=>'<option>' + r + '</option>').join('')}
+          </select>
+        </div>
       </div>
+      <div id="userTableWrap" style="overflow-x:auto"></div>
     </div>`;
+
+  renderUserTable();
+}
+
+function filterUsers() {
+  renderUserTable();
+}
+
+function renderUserTable() {
+  const wrap       = $('userTableWrap');
+  const titleEl    = $('userCountTitle');
+  const q          = $('userSearch')       ? $('userSearch').value.toLowerCase()       : '';
+  const statusF    = $('userStatusFilter') ? $('userStatusFilter').value                : '';
+  const roleF      = $('userRoleFilter')   ? $('userRoleFilter').value                  : '';
+  if (!wrap) return;
+
+  const filtered = (window.USERS_DB || []).filter(u => {
+    const mQ = !q       || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || u.role.toLowerCase().includes(q) || u.dept.toLowerCase().includes(q);
+    const mS = !statusF || u.status === statusF;
+    const mR = !roleF   || u.role   === roleF;
+    return mQ && mS && mR;
+  });
+
+  if (titleEl) titleEl.textContent = `Users (${filtered.length}${filtered.length !== window.USERS_DB.length ? ' filtered / ' + window.USERS_DB.length + ' total' : ''})`;
+
+  const statusBadge = s => {
+    const map = { Online:'badge-low', Away:'badge-medium', Offline:'badge-info' };
+    return `<span class="badge ${map[s]||'badge-info'}">${s.toUpperCase()}</span>`;
+  };
+
+  const avatarColors = ['#1976d2','#7b1fa2','#388e3c','#f57c00','#c62828','#0288d1','#00695c','#6d4c41'];
+  const avatarColor  = name => avatarColors[name.charCodeAt(0) % avatarColors.length];
+
+  wrap.innerHTML = `
+    <table class="amr-table" style="width:100%">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Role</th>
+          <th>Department</th>
+          <th>Phone</th>
+          <th>Last Active</th>
+          <th>Status</th>
+          <th>Joined</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${filtered.length === 0 ? `<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-muted)">No users match the current filters.</td></tr>` :
+        filtered.map(u => `
+          <tr>
+            <td style="padding:10px 8px">
+              <div style="display:flex;align-items:center;gap:9px">
+                <div style="width:32px;height:32px;border-radius:50%;background:${avatarColor(u.name)};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0">
+                  ${u.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()}
+                </div>
+                <span style="font-weight:600;color:var(--text-primary)">${u.name}</span>
+              </div>
+            </td>
+            <td style="color:var(--accent-blue)">${u.email}</td>
+            <td>${u.role}</td>
+            <td>${u.dept}</td>
+            <td style="color:var(--text-muted)">${u.phone || '—'}</td>
+            <td style="color:var(--text-muted)">${u.last}</td>
+            <td>${statusBadge(u.status)}</td>
+            <td style="color:var(--text-muted)">${u.joined}</td>
+            <td>
+              <div style="display:flex;gap:5px">
+                <button class="btn btn-outline" style="padding:3px 9px;font-size:11px" onclick="openEditUserModal('${u.id}')">Edit</button>
+                <button class="btn btn-outline" style="padding:3px 9px;font-size:11px;color:var(--accent-red);border-color:var(--accent-red)" onclick="deleteUser('${u.id}')">✕</button>
+              </div>
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+// ─── ADD USER MODAL ───────────────────────────────────────────
+function openAddUserModal(editId) {
+  const isEdit = !!editId;
+  const eu     = isEdit ? (window.USERS_DB || []).find(u => u.id === editId) : null;
+  if (isEdit && !eu) { showToast('User not found', 'error'); return; }
+
+  const existing = document.querySelector('.modal-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'addUserOverlay';
+
+  const roles = ['Administrator','Infection Control','ICU Nurse','Intensivist','Lab Technician',
+                  'Pharmacist','Radiologist','General Physician','Surgeon','Epidemiologist',
+                  'Microbiologist','Data Analyst','Nurse Practitioner','Emergency Physician','Other'];
+  const depts = ['All','ICU','Microbiology','Laboratory','Emergency','Radiology','Pharmacy',
+                  'Surgery','General Medicine','Neurology','Cardiology','Oncology','Paediatrics',
+                  'Infection Control','Administration','IT & Systems'];
+  const statuses = ['Online','Away','Offline'];
+
+  // Build option HTML without nested backticks
+  const statusOpts  = statuses.map(s => '<option value="' + s + '"' + (isEdit && eu.status===s ? ' selected' : '') + '>' + s + '</option>').join('');
+  const roleOpts    = '<option value="">Select role...</option>' + roles.map(r => '<option value="' + r + '"' + (isEdit && eu.role===r ? ' selected' : '') + '>' + r + '</option>').join('');
+  const deptOpts    = '<option value="">Select department...</option>' + depts.map(d => '<option value="' + d + '"' + (isEdit && eu.dept===d ? ' selected' : '') + '>' + d + '</option>').join('');
+
+  const modalTitle   = isEdit ? 'Edit User' : 'Add New User';
+  const modalSubtitle= isEdit ? ('Editing: ' + eu.name + ' (' + eu.id + ')') : 'Fill in all required fields to register a new user';
+  const onsubmitArg  = isEdit ? ("'" + editId + "'") : 'null';
+  const submitLabel  = isEdit ? '💾 Save Changes' : '➕ Add User';
+  const nameVal      = isEdit ? eu.name : '';
+  const emailVal     = isEdit ? eu.email : '';
+  const phoneVal     = isEdit ? (eu.phone||'') : '';
+
+  const pwSection = isEdit ? '' : [
+    '<div class="modal-section-title" style="margin-top:16px">Account Security</div>',
+    '<div class="modal-grid-2">',
+    '<div><label class="apf-label">Password <span class="apf-req">*</span></label>',
+    '<input class="apf-input" id="uf_password" type="password" placeholder="Min. 8 characters" required minlength="8" /></div>',
+    '<div><label class="apf-label">Confirm Password <span class="apf-req">*</span></label>',
+    '<input class="apf-input" id="uf_confirm" type="password" placeholder="Re-enter password" required minlength="8" /></div>',
+    '</div>'
+  ].join('');
+
+  overlay.innerHTML =
+    '<div class="modal-box" style="max-width:620px">' +
+      '<div class="modal-header">' +
+        '<div>' +
+          '<div class="modal-patient-name">' + modalTitle + '</div>' +
+          '<div class="modal-patient-id">' + modalSubtitle + '</div>' +
+        '</div>' +
+        '<button class="modal-close-btn" onclick="closeUserModal()">✕</button>' +
+      '</div>' +
+      '<div class="modal-body">' +
+        '<form id="addUserForm" onsubmit="submitUser(event,' + onsubmitArg + ')" autocomplete="off">' +
+
+          '<div class="modal-section-title">Personal Information</div>' +
+          '<div class="modal-grid-2">' +
+            '<div><label class="apf-label">Full Name <span class="apf-req">*</span></label>' +
+              '<input class="apf-input" id="uf_name" type="text" placeholder="e.g. Dr. Sarah Kim" required value="' + nameVal + '" /></div>' +
+            '<div><label class="apf-label">Email Address <span class="apf-req">*</span></label>' +
+              '<input class="apf-input" id="uf_email" type="email" placeholder="e.g. user@medshield.ai" required value="' + emailVal + '" /></div>' +
+            '<div><label class="apf-label">Phone Number</label>' +
+              '<input class="apf-input" id="uf_phone" type="tel" placeholder="e.g. +1-555-0100" value="' + phoneVal + '" /></div>' +
+            '<div><label class="apf-label">Status <span class="apf-req">*</span></label>' +
+              '<select class="apf-input" id="uf_status" required>' + statusOpts + '</select></div>' +
+          '</div>' +
+
+          '<div class="modal-section-title" style="margin-top:16px">Role &amp; Access</div>' +
+          '<div class="modal-grid-2">' +
+            '<div><label class="apf-label">User Role <span class="apf-req">*</span></label>' +
+              '<select class="apf-input" id="uf_role" required>' + roleOpts + '</select></div>' +
+            '<div><label class="apf-label">Department <span class="apf-req">*</span></label>' +
+              '<select class="apf-input" id="uf_dept" required>' + deptOpts + '</select></div>' +
+          '</div>' +
+
+          pwSection +
+
+          '<div id="uf_error" style="display:none;color:#ef5350;font-size:12px;margin-top:12px;padding:10px 12px;background:rgba(239,83,80,0.1);border:1px solid rgba(239,83,80,0.3);border-radius:8px"></div>' +
+
+          '<div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">' +
+            '<button type="button" class="btn btn-outline" onclick="closeUserModal()">Cancel</button>' +
+            '<button type="submit" class="btn btn-primary" id="uf_submitBtn">' + submitLabel + '</button>' +
+          '</div>' +
+        '</form>' +
+      '</div>' +
+    '</div>';
+
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeUserModal(); });
+  document.addEventListener('keydown', _escUserClose);
+  document.body.appendChild(overlay);
+}
+
+function openEditUserModal(id) { openAddUserModal(id); }
+
+function _escUserClose(e) { if (e.key === 'Escape') closeUserModal(); }
+
+function closeUserModal() {
+  const ov = document.getElementById('addUserOverlay');
+  if (ov) ov.remove();
+  document.removeEventListener('keydown', _escUserClose);
+}
+
+function submitUser(e, editId) {
+  e.preventDefault();
+  const get = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  const errEl = $('uf_error');
+  const isEdit = !!editId;
+
+  const name   = get('uf_name');
+  const email  = get('uf_email');
+  const phone  = get('uf_phone');
+  const role   = get('uf_role');
+  const dept   = get('uf_dept');
+  const status = get('uf_status');
+
+  // Required check
+  if (!name || !email || !role || !dept || !status) {
+    errEl.textContent = '⚠ Please fill in all required fields.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  // Email format check
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    errEl.textContent = '⚠ Please enter a valid email address.';
+    errEl.style.display = 'block';
+    document.getElementById('uf_email').focus();
+    return;
+  }
+
+  // Duplicate email check (skip self on edit)
+  const dupEmail = (window.USERS_DB || []).find(u => u.email.toLowerCase() === email.toLowerCase() && u.id !== editId);
+  if (dupEmail) {
+    errEl.textContent = `⚠ Email "${email}" is already registered to ${dupEmail.name}.`;
+    errEl.style.display = 'block';
+    document.getElementById('uf_email').focus();
+    return;
+  }
+
+  // Password check for new users only
+  if (!isEdit) {
+    const pw  = get('uf_password');
+    const cpw = get('uf_confirm');
+    if (!pw || pw.length < 8) {
+      errEl.textContent = '⚠ Password must be at least 8 characters.';
+      errEl.style.display = 'block';
+      document.getElementById('uf_password').focus();
+      return;
+    }
+    if (pw !== cpw) {
+      errEl.textContent = '⚠ Passwords do not match.';
+      errEl.style.display = 'block';
+      document.getElementById('uf_confirm').focus();
+      return;
+    }
+  }
+
+  errEl.style.display = 'none';
+  const btn = $('uf_submitBtn');
+  if (btn) { btn.disabled = true; btn.textContent = isEdit ? 'Saving…' : 'Adding…'; }
+
+  const now    = new Date();
+  const joined = now.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
+
+  setTimeout(() => {
+    if (isEdit) {
+      const idx = (window.USERS_DB || []).findIndex(u => u.id === editId);
+      if (idx !== -1) {
+        window.USERS_DB[idx] = { ...window.USERS_DB[idx], name, email, phone, role, dept, status };
+      }
+      closeUserModal();
+      renderUserMgmt();
+      showToast(`✓ User "${name}" updated successfully`, 'success');
+    } else {
+      const nextId = 'U-' + String((window.USERS_DB || []).length + 1).padStart(3, '0');
+      window.USERS_DB.push({ id: nextId, name, email, phone, role, dept, status, last: 'Just now', joined });
+      closeUserModal();
+      renderUserMgmt();
+      showToast(`✓ User "${name}" (${nextId}) added successfully`, 'success');
+    }
+    // Update role filter options after adding
+    const rf = $('userRoleFilter');
+    if (rf) {
+      const current = rf.value;
+      rf.innerHTML = `<option value="">All Roles</option>` +
+        [...new Set((window.USERS_DB||[]).map(u=>u.role))].map(r=>`<option${r===current?' selected':''}>${r}</option>`).join('');
+    }
+  }, 250);
+}
+
+function deleteUser(id) {
+  const u = (window.USERS_DB || []).find(x => x.id === id);
+  if (!u) return;
+  if (!confirm(`Remove user "${u.name}" (${u.id})? This cannot be undone.`)) return;
+  window.USERS_DB = window.USERS_DB.filter(x => x.id !== id);
+  renderUserMgmt();
+  showToast(`User "${u.name}" removed`, 'success');
 }
 
 // ─── SETTINGS PAGE ────────────────────────────────────────────

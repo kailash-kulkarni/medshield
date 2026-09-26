@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MediShield AI – Hospital Surveillance Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -105,19 +106,23 @@
       <div class="topbar-center">
         <span id="headerDateRange" class="date-range">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-          <span id="dateRangeText">13 May – 19 May 2024</span>
+          <span id="dateRangeText">Loading…</span>
         </span>
       </div>
       <div class="topbar-right">
         <div class="topbar-clock" id="topbarClock">10:30 AM</div>
         <div class="dept-select-wrap">
-          <select class="dept-select">
-            <option>All Departments</option>
-            <option>ICU</option>
-            <option>Emergency</option>
-            <option>Cardiology</option>
-            <option>Oncology</option>
-            <option>Neurology</option>
+          <select class="dept-select" id="deptSelect" onchange="handleDeptChange()">
+            <option value="">All Departments</option>
+            <option value="ICU">ICU</option>
+            <option value="Emergency">Emergency</option>
+            <option value="Cardiology">Cardiology</option>
+            <option value="Oncology">Oncology</option>
+            <option value="Neurology">Neurology</option>
+            <option value="General Medicine">General Medicine</option>
+            <option value="Surgery">Surgery</option>
+            <option value="Microbiology">Microbiology</option>
+            <option value="Pharmacy">Pharmacy</option>
           </select>
         </div>
         <button class="icon-btn notif-btn" onclick="navigateTo('alerts')">
