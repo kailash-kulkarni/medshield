@@ -1355,6 +1355,152 @@ function closePatientModal() {
   document.removeEventListener('keydown', _escClose);
 }
 
+// ─── DOCTOR PROFILE MODAL ────────────────────────────────────
+const DOCTOR_META = {
+  'Dr. Sarah Kim':      { specialty:'Infection Control',  dept:'Microbiology', phone:'+1 (555) 101-2001', email:'s.kim@medshield.org',       status:'Online',  img:'SK' },
+  'Dr. Raj Patel':      { specialty:'Intensivist',        dept:'ICU',          phone:'+1 (555) 101-2002', email:'r.patel@medshield.org',     status:'Online',  img:'RP' },
+  'Dr. Emily Chen':     { specialty:'Pulmonologist',      dept:'Respiratory',  phone:'+1 (555) 101-2003', email:'e.chen@medshield.org',      status:'Away',    img:'EC' },
+  'Dr. Carlos Rivera':  { specialty:'General Medicine',   dept:'MED',          phone:'+1 (555) 101-2004', email:'c.rivera@medshield.org',    status:'Online',  img:'CR' },
+  'Dr. James Okafor':   { specialty:'Surgeon',            dept:'Surgery',      phone:'+1 (555) 101-2005', email:'j.okafor@medshield.org',    status:'Offline', img:'JO' },
+  'Dr. Priya Nair':     { specialty:'Microbiologist',     dept:'Microbiology', phone:'+1 (555) 101-2006', email:'p.nair@medshield.org',      status:'Online',  img:'PN' },
+  'Dr. Thomas Walsh':   { specialty:'Cardiologist',       dept:'Cardiology',   phone:'+1 (555) 101-2007', email:'t.walsh@medshield.org',     status:'Away',    img:'TW' },
+  'Dr. Fatima Al-Hassan':{ specialty:'Neurologist',       dept:'Neurology',    phone:'+1 (555) 101-2008', email:'f.alhassan@medshield.org',  status:'Online',  img:'FA' },
+  'Dr. Michael Torres': { specialty:'Oncologist',         dept:'Oncology',     phone:'+1 (555) 101-2009', email:'m.torres@medshield.org',    status:'Online',  img:'MT' },
+  'Dr. Lisa Wang':      { specialty:'Paediatrician',      dept:'Paediatrics',  phone:'+1 (555) 101-2010', email:'l.wang@medshield.org',      status:'Offline', img:'LW' },
+  'Dr. Ahmed Hassan':   { specialty:'Nephrologist',       dept:'Nephrology',   phone:'+1 (555) 101-2011', email:'a.hassan@medshield.org',    status:'Online',  img:'AH' },
+  'Dr. Julia Roberts':  { specialty:'Gastroenterologist', dept:'Gastro',       phone:'+1 (555) 101-2012', email:'j.roberts@medshield.org',   status:'Away',    img:'JR' },
+  'Dr. Admin':          { specialty:'Administrator',      dept:'All Departments', phone:'+1 (555) 100-0001', email:'admin@medshield.org',    status:'Online',  img:'DA' },
+};
+
+function openDoctorModal(doctorName) {
+  const existing = document.querySelector('.dr-modal-overlay');
+  if (existing) existing.remove();
+
+  const db       = window.PATIENTS_DB || [];
+  const patients = db.filter(p => p.doctor === doctorName);
+  const meta     = DOCTOR_META[doctorName] || { specialty:'Physician', dept:'General', phone:'—', email:'—', status:'Online', img: doctorName.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase() };
+
+  const statusColor = { Online:'#4caf50', Away:'#ffa726', Offline:'#8b949e' }[meta.status] || '#8b949e';
+
+  const high   = patients.filter(p => p.risk === 'high').length;
+  const medium = patients.filter(p => p.risk === 'medium').length;
+  const low    = patients.filter(p => p.risk === 'low').length;
+  const active = patients.filter(p => p.status !== 'Discharged').length;
+
+  const riskColor = r => ({ high:'#ef5350', medium:'#ffa726', low:'#66bb6a' }[r] || '#8b949e');
+  const statusCol = s => ({ Critical:'#ef5350', Stable:'#ffa726', Improving:'#66bb6a', 'Under Observation':'#29b6f6', Discharged:'#8b949e' }[s] || '#8b949e');
+
+  const patientRows = patients.length
+    ? patients.map(p => `
+        <tr class="dr-pt-row" onclick="closeDoctorModal();openPatientModal('${p.id}')" title="View full patient record">
+          <td style="color:var(--accent-blue);font-weight:600">${p.id}</td>
+          <td style="color:var(--text-primary);font-weight:500;white-space:nowrap">${p.name}</td>
+          <td>${p.age}</td>
+          <td>${p.ward}</td>
+          <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${p.diag}">${p.diag}</td>
+          <td><span class="badge badge-${p.risk}">${p.risk.toUpperCase()}</span></td>
+          <td style="color:${statusCol(p.status)};font-weight:500">${p.status}</td>
+          <td style="color:var(--text-muted)">${p.adm}</td>
+        </tr>`).join('')
+    : `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:20px">No patients assigned to this doctor</td></tr>`;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'dr-modal-overlay';
+  overlay.innerHTML = `
+    <div class="dr-modal-box">
+
+      <!-- Header -->
+      <div class="dr-modal-header">
+        <div class="dr-modal-avatar">${meta.img}</div>
+        <div class="dr-modal-info">
+          <div class="dr-modal-name">${doctorName}</div>
+          <div class="dr-modal-sub">${meta.specialty} &nbsp;·&nbsp; ${meta.dept}</div>
+          <div class="dr-modal-status">
+            <span class="dr-status-dot" style="background:${statusColor}"></span>
+            <span style="font-size:11px;color:${statusColor}">${meta.status}</span>
+          </div>
+        </div>
+        <button class="modal-close-btn" onclick="closeDoctorModal()">✕</button>
+      </div>
+
+      <!-- Contact & Summary row -->
+      <div class="dr-meta-row">
+        <div class="dr-meta-item">
+          <div class="dr-meta-label">📞 Phone</div>
+          <div class="dr-meta-value">${meta.phone}</div>
+        </div>
+        <div class="dr-meta-item">
+          <div class="dr-meta-label">✉️ Email</div>
+          <div class="dr-meta-value">${meta.email}</div>
+        </div>
+        <div class="dr-meta-item">
+          <div class="dr-meta-label">🏥 Department</div>
+          <div class="dr-meta-value">${meta.dept}</div>
+        </div>
+        <div class="dr-meta-item">
+          <div class="dr-meta-label">🩺 Specialty</div>
+          <div class="dr-meta-value">${meta.specialty}</div>
+        </div>
+      </div>
+
+      <!-- Patient count chips -->
+      <div class="dr-count-row">
+        <div class="dr-count-chip" style="border-color:var(--accent-blue)">
+          <div class="dr-chip-val" style="color:var(--accent-blue)">${patients.length}</div>
+          <div class="dr-chip-label">Total Patients</div>
+        </div>
+        <div class="dr-count-chip" style="border-color:#66bb6a">
+          <div class="dr-chip-val" style="color:#66bb6a">${active}</div>
+          <div class="dr-chip-label">Active</div>
+        </div>
+        <div class="dr-count-chip" style="border-color:#ef5350">
+          <div class="dr-chip-val" style="color:#ef5350">${high}</div>
+          <div class="dr-chip-label">High Risk</div>
+        </div>
+        <div class="dr-count-chip" style="border-color:#ffa726">
+          <div class="dr-chip-val" style="color:#ffa726">${medium}</div>
+          <div class="dr-chip-label">Medium Risk</div>
+        </div>
+        <div class="dr-count-chip" style="border-color:#66bb6a">
+          <div class="dr-chip-val" style="color:#66bb6a">${low}</div>
+          <div class="dr-chip-label">Low Risk</div>
+        </div>
+      </div>
+
+      <!-- Patient list table -->
+      <div class="dr-modal-section-title">
+        Assigned Patients
+        <span style="font-size:11px;font-weight:400;color:var(--text-muted);margin-left:6px">(click any row to view full record)</span>
+      </div>
+      <div class="dr-pt-table-wrap">
+        <table class="dr-pt-table">
+          <thead>
+            <tr>
+              <th>ID</th><th>Name</th><th>Age</th><th>Ward</th>
+              <th>Diagnosis</th><th>Risk</th><th>Status</th><th>Admitted</th>
+            </tr>
+          </thead>
+          <tbody>${patientRows}</tbody>
+        </table>
+      </div>
+
+    </div>`;
+
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeDoctorModal(); });
+  document.addEventListener('keydown', _escDrClose);
+  document.body.appendChild(overlay);
+}
+
+function _escDrClose(e) {
+  if (e.key === 'Escape') closeDoctorModal();
+}
+
+function closeDoctorModal() {
+  const overlay = document.querySelector('.dr-modal-overlay');
+  if (overlay) overlay.remove();
+  document.removeEventListener('keydown', _escDrClose);
+}
+
 // ─── CSV EXPORT ───────────────────────────────────────────────
 function exportPatientCSV() {
   const rows = ptFiltered.length ? ptFiltered : (window.PATIENTS_DB || []);
